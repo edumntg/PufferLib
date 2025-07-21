@@ -9,8 +9,8 @@
 
 #define G 9.81f // gravity constant
 #define PI 3.14159265358979323846f // pi constant
-#define DT 0.01f // time step for simulation
-#define MAX_STEPS 500 // max sim steps (MAX_STEPS * DT = seconds)
+#define DT 0.02f // time step for simulation
+#define MAX_STEPS 200 // max sim steps (MAX_STEPS * DT = seconds)
 #define eps 0.0001f // epsilon for floating point comparison
 #define Y_MIN 0.0f
 #define Y_MAX 2.0f
@@ -21,6 +21,7 @@
 #define BALL_RADIUS 32 // Ball radius in pixels
 #define WINDOW_WIDTH 400
 #define WINDOW_HEIGHT 600
+#define I_MAX 5.0f // max current
 
 // Log struct for PufferLib
 typedef struct {
@@ -70,6 +71,10 @@ void c_reset(MagLev* env) {
     if (env->truncations) env->truncations[0] = 0;
 }
 
+float clamp(float value, float min, float max) {
+    return fminf(fmaxf(value, min), max);
+}
+
 // Step environment forward
 void c_step(MagLev* env) {
     float a = env->actions[0];
@@ -77,7 +82,7 @@ void c_step(MagLev* env) {
     if (!isfinite(a)) {
         a = 0.0f;
     }
-    a = fminf(fmaxf(a, -1.0f), 1.0f);
+    a = clamp(a, -I_MAX, I_MAX); // Clamp current to max value
     env->actions[0] = a;
 
     // Magnetic force: F = k * i^2 / (x + eps)^2
@@ -103,9 +108,9 @@ void c_step(MagLev* env) {
     bool done = terminated || truncated;
 
     // Reward: penalize distance from target, velocity, and current usage
-    env->rewards[0] = -fabsf(env->x - X_TARGET) - 0.1f * fabsf(env->v) - 0.01f * (a * a);
-
+    env->rewards[0] = done ? 0.0f : 5.0f - fabsf(env->x - X_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
     env->terminals[0] = terminated ? 1 : 0;
+
     if (env->truncations) env->truncations[0] = truncated ? 1 : 0;
 
     if (done) {
