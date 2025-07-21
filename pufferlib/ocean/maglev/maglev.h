@@ -12,7 +12,7 @@
 #define G 9.81f // gravity constant
 #define PI 3.14159265358979323846f // pi constant
 #define DT 0.02f // time step for simulation
-#define MAX_STEPS 100 // max sim steps (MAX_STEPS * DT = seconds)
+#define MAX_STEPS 200 // max sim steps (MAX_STEPS * DT = seconds)
 #define eps 0.0001f // epsilon for floating point comparison
 #define Y_MIN 0.0f
 #define Y_MAX 2.0f
@@ -24,7 +24,8 @@
 #define WINDOW_WIDTH 400
 #define WINDOW_HEIGHT 600
 #define I_MIN 0.0f // min current
-#define I_MAX 2.0f // max current
+#define I_MAX 6.0f // max current
+#define DAMPING_COEFF 0.5f // damping coefficient for velocity
 
 // Log struct for PufferLib
 typedef struct {
@@ -95,7 +96,7 @@ void c_step(MagLev* env) {
 
     // Magnetic force: F = k * i^2 / (x + eps)^2
     float dist = fmaxf(env->x, eps);  // Prevent division by zero
-    float balance = K * a * a / (dist * dist) - M * G;
+    float balance = K * a * a / (dist * dist) - M * G - DAMPING_COEFF * env->v;
 
     // Velocity change
     float v_dot = balance / M;

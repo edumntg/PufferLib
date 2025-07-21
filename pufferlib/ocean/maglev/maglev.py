@@ -11,7 +11,7 @@ class MagLev(pufferlib.PufferEnv):
         high = np.array([2.0, 10.0])
         self.single_observation_space = gymnasium.spaces.Box(low=low, high=high,
                                                              shape=(2,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.Box(low = 0.0, high = 2.0, shape = (1,), dtype = np.float32)
+        self.single_action_space = gymnasium.spaces.Box(low = 0.0, high = 6.0, shape = (1,), dtype = np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
@@ -28,7 +28,8 @@ class MagLev(pufferlib.PufferEnv):
     def step(self, actions):
         self.tick += 1
 
-        self.actions[:] = actions
+        # self.actions[:] = actions
+        self.actions[:] = 3.10
         binding.vec_step(self.c_envs)
 
         info = []
