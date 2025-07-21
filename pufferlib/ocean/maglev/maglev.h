@@ -5,12 +5,14 @@
 #include <math.h>
 #include <stdbool.h>
 #include <float.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "raylib.h"
 
 #define G 9.81f // gravity constant
 #define PI 3.14159265358979323846f // pi constant
 #define DT 0.02f // time step for simulation
-#define MAX_STEPS 200 // max sim steps (MAX_STEPS * DT = seconds)
+#define MAX_STEPS 100 // max sim steps (MAX_STEPS * DT = seconds)
 #define eps 0.0001f // epsilon for floating point comparison
 #define Y_MIN 0.0f
 #define Y_MAX 2.0f
@@ -21,7 +23,8 @@
 #define BALL_RADIUS 32 // Ball radius in pixels
 #define WINDOW_WIDTH 400
 #define WINDOW_HEIGHT 600
-#define I_MAX 5.0f // max current
+#define I_MIN 0.0f // min current
+#define I_MAX 2.0f // max current
 
 // Log struct for PufferLib
 typedef struct {
@@ -57,6 +60,10 @@ void add_log(MagLev* env) {
     env->log.n += 1.0f;
 }
 
+float random_float(float low, float high) {
+    return low + (high - low) * ((float)rand() / (float)RAND_MAX);
+}
+
 // Reset environment to initial state
 void c_reset(MagLev* env) {
     env->x = Y_MIN + 0.1f; // start slightly above ground
@@ -64,6 +71,7 @@ void c_reset(MagLev* env) {
     env->tick = 0;
     env->size = 1; // Default size for window scaling (can be set by binding)
 
+    env->actions[0] = random_float(I_MIN, I_MAX); // Random initial current between 0 and I_MAX
     env->observations[0] = env->x; // position
     env->observations[1] = env->v; // velocity
     env->rewards[0] = 0.0f;
@@ -82,11 +90,12 @@ void c_step(MagLev* env) {
     if (!isfinite(a)) {
         a = 0.0f;
     }
-    a = clamp(a, -I_MAX, I_MAX); // Clamp current to max value
+    a = clamp(a, I_MIN, I_MAX); // Clamp current to max value
     env->actions[0] = a;
 
     // Magnetic force: F = k * i^2 / (x + eps)^2
-    float balance = K * a * a / ((env->x + eps) * (env->x + eps)) - M * G;
+    float dist = fmaxf(env->x, eps);  // Prevent division by zero
+    float balance = K * a * a / (dist * dist) - M * G;
 
     // Velocity change
     float v_dot = balance / M;
@@ -103,12 +112,21 @@ void c_step(MagLev* env) {
     env->tick += 1;
 
     // Termination and truncation
-    bool terminated = env->x > Y_MAX || env->v < -V_MAX || env->v > V_MAX;
+    bool terminated = env->x < Y_MIN || env->x > Y_MAX || env->v < -V_MAX || env->v > V_MAX;
     bool truncated = env->tick >= MAX_STEPS;
     bool done = terminated || truncated;
 
     // Reward: penalize distance from target, velocity, and current usage
-    env->rewards[0] = terminated ? -1.0f : Y_MAX - fabsf(env->x - X_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
+    //env->rewards[0] = terminated ? -1.0f : Y_MAX - fabsf(env->x - X_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
+    float dist_penalty = fabsf(env->x - X_TARGET);
+    float vel_penalty = 0.1f * fabsf(env->v);
+    float action_penalty = 0.01f * fabsf(a);
+
+    // Only padd a high penalty if the sim is terminated (out of window, too much velocity, etc)
+    // If sim is ended because of max_steps, it means that the ball remained in the window so just add a penalty
+    // based on the distance to the target, velocity and action
+    env->rewards[0] = terminated ? -10.0f : 1.0f -dist_penalty - vel_penalty - action_penalty;
+
     env->terminals[0] = terminated ? 1 : 0;
 
     if (env->truncations) env->truncations[0] = truncated ? 1 : 0;
@@ -132,24 +150,43 @@ void c_render(MagLev* env) {
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
     }
+
     BeginDrawing();
     ClearBackground((Color){6, 24, 24, 255});
+
     // Draw floor/base
     int floor_y = WINDOW_HEIGHT - 60;
     DrawRectangle(0, floor_y, WINDOW_WIDTH, 60, (Color){80, 80, 80, 255});
+
     // Draw ball
     int ball_x = WINDOW_WIDTH / 2;
-    // Map env->x (Y_MIN..Y_MAX) to screen y (floor_y..top)
     float y_norm = (env->x - Y_MIN) / (Y_MAX - Y_MIN);
     int ball_y = floor_y - (int)(y_norm * (floor_y - BALL_RADIUS));
     DrawCircle(ball_x, ball_y, BALL_RADIUS, (Color){0, 187, 187, 255});
-    // Optionally: draw target line
+
+    // Draw target line
     float target_norm = (X_TARGET - Y_MIN) / (Y_MAX - Y_MIN);
     int target_y = floor_y - (int)(target_norm * (floor_y - BALL_RADIUS));
     DrawLine(0, target_y, WINDOW_WIDTH, target_y, (Color){187, 0, 0, 255});
     DrawText("Target", 10, target_y - 20, 20, (Color){187, 0, 0, 255});
+
+    // Render current action value as "I = <value>"
+    char current_text[32];
+    snprintf(current_text, sizeof(current_text), "I = %.4f", env->actions[0]);
+    DrawText(current_text, 10, 10, 20, (Color){255, 255, 255, 255});
+
+    // Render current position and velocity
+    char position_text[64];
+    snprintf(position_text, sizeof(position_text), "Position: %.2f m", env->observations[0]);
+    DrawText(position_text, 10, 40, 20, (Color){255, 255, 255, 255});
+
+    char velocity_text[64];
+    snprintf(velocity_text, sizeof(velocity_text), "Velocity: %.2f m/s", env->observations[1]);
+    DrawText(velocity_text, 10, 70, 20, (Color){255, 255, 255, 255});
+
     EndDrawing();
 }
+
 
 // Required function. Should clean up anything you allocated
 // Do not free env->observations, actions, rewards, terminals
