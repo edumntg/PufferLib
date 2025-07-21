@@ -108,7 +108,7 @@ void c_step(MagLev* env) {
     bool done = terminated || truncated;
 
     // Reward: penalize distance from target, velocity, and current usage
-    env->rewards[0] = done ? 0.0f : 5.0f - fabsf(env->x - X_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
+    env->rewards[0] = terminated ? -1.0f : Y_MAX - fabsf(env->x - X_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
     env->terminals[0] = terminated ? 1 : 0;
 
     if (env->truncations) env->truncations[0] = truncated ? 1 : 0;

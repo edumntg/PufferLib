@@ -3,7 +3,7 @@ import gymnasium
 import numpy as np
 
 import pufferlib
-from pufferlib.ocean.squared import binding
+from pufferlib.ocean.maglev import binding
 
 class MagLev(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=11, buf=None, seed=0):

@@ -2,6 +2,10 @@
 
 int main() {
     MagLev env = {.size = 2};
+    env.observations = (float*)calloc(2, sizeof(float));
+    env.actions = (float*)calloc(1, sizeof(float));
+    env.rewards = (float*)calloc(1, sizeof(float));
+    env.terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
 
     c_reset(&env);
     c_render(&env);
