@@ -15,7 +15,7 @@ int main() {
             if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) env.actions[0] = 5.0f;
             if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env.actions[0] = -5.0f;
         } else {
-            env.actions[0] = rand() % 5.0f - 2.5f; // Random action between -2.5 and 2.5
+            env.actions[0] = rand() % 2.0f;
         }
         c_step(&env);
         c_render(&env);

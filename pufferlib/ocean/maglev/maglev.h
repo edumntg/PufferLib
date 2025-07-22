@@ -12,19 +12,27 @@
 #define G 9.81f // gravity constant
 #define PI 3.14159265358979323846f // pi constant
 #define DT 0.02f // time step for simulation
+
+// Obs. space bounds
+#define Y_MIN 0.0f
+#define Y_MAX 5.0f
+#define V_MIN -10.0f
+#define V_MAX 10.0f
+
+// Action space bounds
+#define I_MIN 0.0f
+#define I_MAX 12.0f
+
+// Target
+//#define Y_TARGET 0.7f
+
 #define MAX_STEPS 200 // max sim steps (MAX_STEPS * DT = seconds)
 #define eps 0.0001f // epsilon for floating point comparison
-#define Y_MIN 0.0f
-#define Y_MAX 2.0f
 #define M 0.1f // mass in kg
 #define K 0.05f // spring constant for magnetic force
-#define X_TARGET 0.7f // desired position of ball in meters
-#define V_MAX 10.0f // max velocity of ball in m/s
 #define BALL_RADIUS 32 // Ball radius in pixels
 #define WINDOW_WIDTH 400
 #define WINDOW_HEIGHT 600
-#define I_MIN 0.0f // min current
-#define I_MAX 6.0f // max current
 #define DAMPING_COEFF 0.5f // damping coefficient for velocity
 
 // Log struct for PufferLib
@@ -47,6 +55,7 @@ typedef struct {
 
     float x; // vertical position
     float v; // vertical velocity
+    float target; // target
 
     int tick; // step counter
     int size; // for window sizing (new)
@@ -67,14 +76,18 @@ float random_float(float low, float high) {
 
 // Reset environment to initial state
 void c_reset(MagLev* env) {
-    env->x = Y_MIN + 0.1f; // start slightly above ground
-    env->v = 0.0f;
+    env->x = -0.9f; // start at any position
+    env->v = 0.0f; // start at rest
+
+    env->target = random_float(0.0f, 0.9f);
+
     env->tick = 0;
     env->size = 1; // Default size for window scaling (can be set by binding)
 
-    env->actions[0] = random_float(I_MIN, I_MAX); // Random initial current between 0 and I_MAX
+    env->actions[0] = random_float(-1.0f, 1.0f); // Random initial current
     env->observations[0] = env->x; // position
     env->observations[1] = env->v; // velocity
+    env->observations[2] = env->target; // target pos
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0;
     if (env->truncations) env->truncations[0] = 0;
@@ -89,44 +102,51 @@ void c_step(MagLev* env) {
     float a = env->actions[0];
 
     if (!isfinite(a)) {
-        a = 0.0f;
+        a = -1.0f;
     }
-    a = clamp(a, I_MIN, I_MAX); // Clamp current to max value
+
     env->actions[0] = a;
-
     // Magnetic force: F = k * i^2 / (x + eps)^2
-    float dist = fmaxf(env->x, eps);  // Prevent division by zero
-    float balance = K * a * a / (dist * dist) - M * G - DAMPING_COEFF * env->v;
+    // compute real current
+//    printf("\n%.4f %.4f %.4f\n", env->x, env->v, a);
 
-    // Velocity change
-    float v_dot = balance / M;
-    env->v += DT * v_dot;
+    float i = (a + 1.0f) * (I_MAX - I_MIN) * 0.5f + I_MIN;
+    // compute real position and velocity (de-scaled)
+    float x = (env->x + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
+    float v = (env->v + 1.0f) * (V_MAX - V_MIN) * 0.5f + V_MIN;
+//    printf("%.4f %.4f %.4f\n", x, v, i);
+    float dist = fmaxf(x, eps);  // Prevent division by zero
+    float balance = K * i * i / (dist * dist) - M * G - DAMPING_COEFF * v;
 
-    // Position change
-    float x_dot = env->v;
-    env->x += DT * x_dot;
-    if (env->x < Y_MIN) {
-        env->x = Y_MIN;
-        env->v = 0.0f;
-    }
+    // Compute changes
+    float v_dot = (balance / M);
+    float x_dot = v;
+
+    // Update values
+    x += DT * x_dot;
+    v += DT * v_dot;
+
+    // Normalize and store
+    env->x = -1.0f + (x - Y_MIN) * 2.0f / (Y_MAX - Y_MIN);
+    env->v = -1.0f + (v - V_MIN) * 2.0f / (V_MAX - V_MIN);
 
     env->tick += 1;
 
     // Termination and truncation
-    bool terminated = env->x < Y_MIN || env->x > Y_MAX || env->v < -V_MAX || env->v > V_MAX;
+    bool terminated = env->x < -1.0f || env->x > 1.0f || env->v < -1.0f || env->v > 1.0f;
     bool truncated = env->tick >= MAX_STEPS;
     bool done = terminated || truncated;
 
     // Reward: penalize distance from target, velocity, and current usage
-    //env->rewards[0] = terminated ? -1.0f : Y_MAX - fabsf(env->x - X_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
-    float dist_penalty = fabsf(env->x - X_TARGET);
+    //env->rewards[0] = terminated ? -1.0f : Y_MAX - fabsf(env->x - Y_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
+    float dist_penalty = fabsf(env->x - env->target);
     float vel_penalty = 0.1f * fabsf(env->v);
-    float action_penalty = 0.01f * fabsf(a);
+    float action_penalty = 0.01f * fabsf(env->actions[0]);
 
     // Only padd a high penalty if the sim is terminated (out of window, too much velocity, etc)
     // If sim is ended because of max_steps, it means that the ball remained in the window so just add a penalty
     // based on the distance to the target, velocity and action
-    env->rewards[0] = terminated ? -10.0f : 1.0f -dist_penalty - vel_penalty - action_penalty;
+    env->rewards[0] = terminated ? -10.0f : -dist_penalty - vel_penalty - action_penalty;
 
     env->terminals[0] = terminated ? 1 : 0;
 
@@ -159,31 +179,48 @@ void c_render(MagLev* env) {
     int floor_y = WINDOW_HEIGHT - 60;
     DrawRectangle(0, floor_y, WINDOW_WIDTH, 60, (Color){80, 80, 80, 255});
 
+    // Env values
+    float i = (env->actions[0] + 1.0f) * (I_MAX - I_MIN) * 0.5f + I_MIN;
+    float x = (env->observations[0] + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
+    float v = (env->observations[1] + 1.0f) * (V_MAX - V_MIN) * 0.5f + V_MIN;
+
+    float target = (env->target + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
+
+    float distance = fabsf(x - target);
+
     // Draw ball
     int ball_x = WINDOW_WIDTH / 2;
-    float y_norm = (env->x - Y_MIN) / (Y_MAX - Y_MIN);
+    float y_norm = (x - Y_MIN) / (Y_MAX - Y_MIN);
     int ball_y = floor_y - (int)(y_norm * (floor_y - BALL_RADIUS));
     DrawCircle(ball_x, ball_y, BALL_RADIUS, (Color){0, 187, 187, 255});
 
     // Draw target line
-    float target_norm = (X_TARGET - Y_MIN) / (Y_MAX - Y_MIN);
+    float target_norm = (target - Y_MIN) / (Y_MAX - Y_MIN);
     int target_y = floor_y - (int)(target_norm * (floor_y - BALL_RADIUS));
     DrawLine(0, target_y, WINDOW_WIDTH, target_y, (Color){187, 0, 0, 255});
     DrawText("Target", 10, target_y - 20, 20, (Color){187, 0, 0, 255});
 
     // Render current action value as "I = <value>"
     char current_text[32];
-    snprintf(current_text, sizeof(current_text), "I = %.4f", env->actions[0]);
+    snprintf(current_text, sizeof(current_text), "I = %.4f", i);
     DrawText(current_text, 10, 10, 20, (Color){255, 255, 255, 255});
 
     // Render current position and velocity
     char position_text[64];
-    snprintf(position_text, sizeof(position_text), "Position: %.2f m", env->observations[0]);
+    snprintf(position_text, sizeof(position_text), "Position: %.2f m", x);
     DrawText(position_text, 10, 40, 20, (Color){255, 255, 255, 255});
 
     char velocity_text[64];
-    snprintf(velocity_text, sizeof(velocity_text), "Velocity: %.2f m/s", env->observations[1]);
+    snprintf(velocity_text, sizeof(velocity_text), "Velocity: %.2f m/s", v);
     DrawText(velocity_text, 10, 70, 20, (Color){255, 255, 255, 255});
+
+    char target_text[64];
+    snprintf(target_text, sizeof(target_text), "Target: %.2f m", target);
+    DrawText(target_text, 10, 100, 20, (Color){255, 255, 255, 255});
+
+    char distance_text[64];
+    snprintf(distance_text, sizeof(distance_text), "Distance: %.2f m", distance);
+    DrawText(distance_text, 10, 130, 20, (Color){255, 255, 255, 255});
 
     EndDrawing();
 }

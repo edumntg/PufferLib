@@ -7,11 +7,11 @@ from pufferlib.ocean.maglev import binding
 
 class MagLev(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
-        low = np.array([0.0, -10.0])
-        high = np.array([2.0, 10.0])
+        low = np.array([-1.0, -1.0, -1.0])
+        high = np.array([1.0, 1.0, 1.0])
         self.single_observation_space = gymnasium.spaces.Box(low=low, high=high,
-                                                             shape=(2,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.Box(low = 0.0, high = 6.0, shape = (1,), dtype = np.float32)
+                                                             shape=(3,), dtype=np.float32)
+        self.single_action_space = gymnasium.spaces.Box(low = -1.0, high = 1.0, shape = (1,), dtype = np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
         self.log_interval = log_interval
@@ -28,8 +28,8 @@ class MagLev(pufferlib.PufferEnv):
     def step(self, actions):
         self.tick += 1
 
-        # self.actions[:] = actions
-        self.actions[:] = 3.10
+        self.actions[:] = actions
+        # self.actions[:] = 2.0
         binding.vec_step(self.c_envs)
 
         info = []
