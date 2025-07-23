@@ -15,27 +15,23 @@
 
 // Obs. space bounds
 #define Y_MIN 0.0f
-#define Y_MAX 5.0f
-#define V_MIN -10.0f
-#define V_MAX 10.0f
+#define Y_MAX 0.7f
+#define V_MIN -3.0f
+#define V_MAX 3.0f
 #define M_MIN 0.1f
-#define M_MAX 3.0f
+#define M_MAX 0.5f
 
 // Action space bounds
 #define I_MIN 0.0f
-#define I_MAX 50.0f
-
-// Target
-//#define Y_TARGET 0.7f
+#define I_MAX 4.0f
 
 #define MAX_STEPS 200 // max sim steps (MAX_STEPS * DT = seconds)
 #define eps 0.0001f // epsilon for floating point comparison
-//#define M 0.1f // mass in kg
-#define K 0.05f // spring constant for magnetic force
+#define K 0.08f // spring constant for magnetic force
 #define BALL_RADIUS 32 // Ball radius in pixels
 #define WINDOW_WIDTH 400
-#define WINDOW_HEIGHT 800
-#define DAMPING_COEFF 0.5f // damping coefficient for velocity
+#define WINDOW_HEIGHT 600
+#define DAMPING_COEFF 0.7f // damping coefficient for velocity
 
 // Log struct for PufferLib
 typedef struct {
@@ -80,10 +76,10 @@ float random_float(float low, float high) {
 
 // Reset environment to initial state
 void c_reset(MagLev* env) {
-    env->x = -0.5f; // start at any position
-    env->v = 0.0f; // start at rest
+    env->x = random_float(-0.6f, 0.3f); // start at any position but at the bottom
+    env->v = 0.0f; // start almost at rest
 
-    env->target = random_float(0.0f, 0.9f);
+    env->target = random_float(-0.5f, 0.5f);
 
     env->m = random_float(-1.0f, 1.0f);
 
@@ -156,9 +152,9 @@ void c_step(MagLev* env) {
 
     // Reward: penalize distance from target, velocity, and current usage
     //env->rewards[0] = terminated ? -1.0f : Y_MAX - fabsf(env->x - Y_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
-    float dist_penalty = fabsf(env->x - env->target);
-    float vel_penalty = 0.1f * fabsf(env->v);
-    float action_penalty = 0.01f * fabsf(env->actions[0]);
+    float dist_penalty = denormalize(fabsf(env->x - env->target), Y_MIN, Y_MAX);
+    float vel_penalty = 0.1f * denormalize(fabsf(env->v), V_MIN, V_MAX);
+    float action_penalty = 0.01f * denormalize(fabsf(env->actions[0]), I_MIN, I_MAX);
 
     // Only padd a high penalty if the sim is terminated (out of window, too much velocity, etc)
     // If sim is ended because of max_steps, it means that the ball remained in the window so just add a penalty
@@ -267,6 +263,10 @@ void c_render(MagLev* env) {
     char mass_text[64];
     snprintf(mass_text, sizeof(mass_text), "Mass: %.2f kg", m);
     DrawText(mass_text, 10, 160, 20, (Color){255, 255, 255, 255});
+
+    char reward_text[64];
+    snprintf(reward_text, sizeof(reward_text), "Reward: %.4f", env->rewards[0]);
+    DrawText(reward_text, 10, 190, 20, (Color){255, 255, 255, 255});
 
     EndDrawing();
 }
