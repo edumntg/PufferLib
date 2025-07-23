@@ -6,11 +6,11 @@ import pufferlib
 from pufferlib.ocean.maglev import binding
 
 class MagLev(pufferlib.PufferEnv):
-    def __init__(self, num_envs=4096, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
-        low = np.array([-1.0, -1.0, -1.0])
-        high = np.array([1.0, 1.0, 1.0])
+    def __init__(self, num_envs=4096, render_mode=None, log_interval=128, size=2, buf=None, seed=0):
+        low = np.array([-1.0, -1.0, -1.0, -1.0])
+        high = np.array([1.0, 1.0, 1.0, 1.0])
         self.single_observation_space = gymnasium.spaces.Box(low=low, high=high,
-                                                             shape=(3,), dtype=np.float32)
+                                                             shape=(4,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Box(low = -1.0, high = 1.0, shape = (1,), dtype = np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs

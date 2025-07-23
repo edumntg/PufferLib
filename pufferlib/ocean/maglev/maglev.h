@@ -18,21 +18,23 @@
 #define Y_MAX 5.0f
 #define V_MIN -10.0f
 #define V_MAX 10.0f
+#define M_MIN 0.1f
+#define M_MAX 3.0f
 
 // Action space bounds
 #define I_MIN 0.0f
-#define I_MAX 30.0f
+#define I_MAX 50.0f
 
 // Target
 //#define Y_TARGET 0.7f
 
 #define MAX_STEPS 200 // max sim steps (MAX_STEPS * DT = seconds)
 #define eps 0.0001f // epsilon for floating point comparison
-#define M 0.1f // mass in kg
+//#define M 0.1f // mass in kg
 #define K 0.05f // spring constant for magnetic force
 #define BALL_RADIUS 32 // Ball radius in pixels
 #define WINDOW_WIDTH 400
-#define WINDOW_HEIGHT 600
+#define WINDOW_HEIGHT 800
 #define DAMPING_COEFF 0.5f // damping coefficient for velocity
 
 // Log struct for PufferLib
@@ -56,6 +58,8 @@ typedef struct {
     float x; // vertical position
     float v; // vertical velocity
     float target; // target
+
+    float m; // mass
 
     int tick; // step counter
     int size; // for window sizing (new)
@@ -81,6 +85,8 @@ void c_reset(MagLev* env) {
 
     env->target = random_float(0.0f, 0.9f);
 
+    env->m = random_float(-1.0f, 1.0f);
+
     env->tick = 0;
     env->size = 1; // Default size for window scaling (can be set by binding)
 
@@ -88,6 +94,8 @@ void c_reset(MagLev* env) {
     env->observations[0] = env->x; // position
     env->observations[1] = env->v; // velocity
     env->observations[2] = env->target; // target pos
+    env->observations[3] = env->m;
+
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0;
     if (env->truncations) env->truncations[0] = 0;
@@ -95,6 +103,14 @@ void c_reset(MagLev* env) {
 
 float clamp(float value, float min, float max) {
     return fminf(fmaxf(value, min), max);
+}
+
+float normalize(float value, float min, float max) {
+    return -1.0f + (value - min) * 2.0f / (max - min);
+}
+
+float denormalize(float value, float min, float max) {
+    return (value + 1.0f) * (max - min) * 0.5f + min;
 }
 
 // Step environment forward
@@ -105,21 +121,22 @@ void c_step(MagLev* env) {
         a = -1.0f;
     }
 
+    // Clamp in case it gets out of bounds by manual input
+    a = clamp(a, -1.0f, 1.0f);
+
     env->actions[0] = a;
     // Magnetic force: F = k * i^2 / (x + eps)^2
-    // compute real current
-//    printf("\n%.4f %.4f %.4f\n", env->x, env->v, a);
-
-    float i = (a + 1.0f) * (I_MAX - I_MIN) * 0.5f + I_MIN;
+    float i = denormalize(a, I_MIN, I_MAX); //(a + 1.0f) * (I_MAX - I_MIN) * 0.5f + I_MIN;
     // compute real position and velocity (de-scaled)
-    float x = (env->x + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
-    float v = (env->v + 1.0f) * (V_MAX - V_MIN) * 0.5f + V_MIN;
-//    printf("%.4f %.4f %.4f\n", x, v, i);
+    float x = denormalize(env->x, Y_MIN, Y_MAX); //(env->x + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
+    float v = denormalize(env->v, V_MIN, V_MAX); //(env->v + 1.0f) * (V_MAX - V_MIN) * 0.5f + V_MIN;
+    float m = denormalize(env->m, M_MIN, M_MAX); //(env->m + 1.0f) * (M_MAX - M_MIN) * 0.5f + M_MIN;
+
     float dist = fmaxf(x, eps);  // Prevent division by zero
-    float balance = K * i * i / (dist * dist) - M * G - DAMPING_COEFF * v;
+    float balance = K * i * i / (dist * dist) - m * G - DAMPING_COEFF * v;
 
     // Compute changes
-    float v_dot = (balance / M);
+    float v_dot = (balance / m);
     float x_dot = v;
 
     // Update values
@@ -127,8 +144,8 @@ void c_step(MagLev* env) {
     v += DT * v_dot;
 
     // Normalize and store
-    env->x = -1.0f + (x - Y_MIN) * 2.0f / (Y_MAX - Y_MIN);
-    env->v = -1.0f + (v - V_MIN) * 2.0f / (V_MAX - V_MIN);
+    env->x = normalize(x, Y_MIN, Y_MAX); //-1.0f + (x - Y_MIN) * 2.0f / (Y_MAX - Y_MIN);
+    env->v = normalize(v, V_MIN, V_MAX); //-1.0f + (v - V_MIN) * 2.0f / (V_MAX - V_MIN);
 
     env->tick += 1;
 
@@ -159,8 +176,19 @@ void c_step(MagLev* env) {
         // Update observations
         env->observations[0] = env->x;
         env->observations[1] = env->v;
+        env->observations[2] = env->target;
+        env->observations[3] = env->m;
     }
 }
+
+// Required function. Should clean up anything you allocated
+// Do not free env->observations, actions, rewards, terminals
+void c_close(MagLev* env) {
+    if (IsWindowReady()) {
+        CloseWindow();
+    }
+}
+
 
 // Required function. Should handle creating the client on first call
 void c_render(MagLev* env) {
@@ -168,8 +196,21 @@ void c_render(MagLev* env) {
         InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "PufferLib MagLev");
         SetTargetFPS(30);
     }
+
+    if (WindowShouldClose()) {
+        c_close(env);
+        exit(0);
+    }
+
     if (IsKeyDown(KEY_ESCAPE)) {
         exit(0);
+    }
+
+    if (IsKeyDown(KEY_LEFT_SHIFT)) {
+        if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) env->actions[0] += 0.1f;
+        if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) env->actions[0] -= 0.1f;
+        if (IsKeyDown(KEY_RIGHT)) env->m += 0.1f;
+        if (IsKeyDown(KEY_LEFT)) env->m -= 0.1f;
     }
 
     BeginDrawing();
@@ -180,11 +221,12 @@ void c_render(MagLev* env) {
     DrawRectangle(0, floor_y, WINDOW_WIDTH, 60, (Color){80, 80, 80, 255});
 
     // Env values
-    float i = (env->actions[0] + 1.0f) * (I_MAX - I_MIN) * 0.5f + I_MIN;
-    float x = (env->observations[0] + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
-    float v = (env->observations[1] + 1.0f) * (V_MAX - V_MIN) * 0.5f + V_MIN;
+    float i = denormalize(env->actions[0], I_MIN, I_MAX); //(env->actions[0] + 1.0f) * (I_MAX - I_MIN) * 0.5f + I_MIN;
+    float x = denormalize(env->x, Y_MIN, Y_MAX); //(env->observations[0] + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
+    float v = denormalize(env->v, V_MIN, V_MAX); //(env->observations[1] + 1.0f) * (V_MAX - V_MIN) * 0.5f + V_MIN;
 
-    float target = (env->target + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
+    float target = denormalize(env->target, Y_MIN, Y_MAX); //(env->target + 1.0f) * (Y_MAX - Y_MIN) * 0.5f + Y_MIN;
+    float m = denormalize(env->m, M_MIN, M_MAX); //
 
     float distance = fabsf(x - target);
 
@@ -222,14 +264,9 @@ void c_render(MagLev* env) {
     snprintf(distance_text, sizeof(distance_text), "Distance: %.2f m", distance);
     DrawText(distance_text, 10, 130, 20, (Color){255, 255, 255, 255});
 
+    char mass_text[64];
+    snprintf(mass_text, sizeof(mass_text), "Mass: %.2f kg", m);
+    DrawText(mass_text, 10, 160, 20, (Color){255, 255, 255, 255});
+
     EndDrawing();
-}
-
-
-// Required function. Should clean up anything you allocated
-// Do not free env->observations, actions, rewards, terminals
-void c_close(MagLev* env) {
-    if (IsWindowReady()) {
-        CloseWindow();
-    }
 }
