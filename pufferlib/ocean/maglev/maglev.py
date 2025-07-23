@@ -6,7 +6,7 @@ import pufferlib
 from pufferlib.ocean.maglev import binding
 
 class MagLev(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
+    def __init__(self, num_envs=4096, render_mode=None, log_interval=128, size=11, buf=None, seed=0):
         low = np.array([-1.0, -1.0, -1.0])
         high = np.array([1.0, 1.0, 1.0])
         self.single_observation_space = gymnasium.spaces.Box(low=low, high=high,
@@ -45,22 +45,22 @@ class MagLev(pufferlib.PufferEnv):
     def close(self):
         binding.vec_close(self.c_envs)
 
-# if __name__ == '__main__':
-#     """Benchmark environment performance."""
-#     num_envs = 4096
-#     env = MagLev(num_envs=num_envs)
-#     env.reset()
-#     tick = 0
-#
-#     atn_cache = 8192
-#     actions = np.random.randint(3.10, 3.10, (atn_cache, 1))
-#
-#     import time
-#     timeout = 20
-#     start = time.time()
-#     while time.time() - start < timeout:
-#         atn = actions[tick % atn_cache]
-#         env.step(atn)
-#         tick += 1
-#     sps = num_envs * tick / (time.time() - start)
-#     print(f'SPS: {sps:,}')
+
+def test_performance(timeout=10, atn_cache=1024):
+    env = MagLev(num_envs=1000)
+    env.reset()
+    tick = 0
+
+    actions = [env.action_space.sample() for _ in range(atn_cache)]
+
+    import time
+    start = time.time()
+    while time.time() - start < timeout:
+        atn = actions[tick % atn_cache]
+        env.step(atn)
+        tick += 1
+
+    print(f"SPS: {env.num_agents * tick / (time.time() - start)}")
+
+if __name__ == "__main__":
+    test_performance()

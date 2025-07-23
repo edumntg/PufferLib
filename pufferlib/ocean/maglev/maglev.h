@@ -21,7 +21,7 @@
 
 // Action space bounds
 #define I_MIN 0.0f
-#define I_MAX 12.0f
+#define I_MAX 30.0f
 
 // Target
 //#define Y_TARGET 0.7f
@@ -76,7 +76,7 @@ float random_float(float low, float high) {
 
 // Reset environment to initial state
 void c_reset(MagLev* env) {
-    env->x = -0.9f; // start at any position
+    env->x = -0.5f; // start at any position
     env->v = 0.0f; // start at rest
 
     env->target = random_float(0.0f, 0.9f);
