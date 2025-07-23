@@ -146,7 +146,7 @@ void c_step(MagLev* env) {
     // Only padd a high penalty if the sim is terminated (out of window, too much velocity, etc)
     // If sim is ended because of max_steps, it means that the ball remained in the window so just add a penalty
     // based on the distance to the target, velocity and action
-    env->rewards[0] = terminated ? -10.0f : -dist_penalty - vel_penalty - action_penalty;
+    env->rewards[0] = terminated ? -10.0f : 1.0f -dist_penalty - vel_penalty - action_penalty;
 
     env->terminals[0] = terminated ? 1 : 0;
 
