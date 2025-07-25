@@ -6,7 +6,7 @@ from pufferlib.ocean.hanoi import binding
 
 class Hanoi(pufferlib.PufferEnv):
     def __init__(self, num_envs=4096, render_mode=None, log_interval=128, size=2, buf=None, seed=0):
-        NUM_DISKS = 4
+        NUM_DISKS = 5
         NUM_PEGS = 3
         self.single_observation_space = gymnasium.spaces.Box(low=-1, high=NUM_DISKS - 1,
                                                              shape=(NUM_PEGS * NUM_DISKS,), dtype=np.float32)

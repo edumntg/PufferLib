@@ -10,9 +10,9 @@
 #include "raylib.h"
 #include <time.h>
 
-#define NUM_DISKS 3
-#define NUM_PEGS 4
-#define MAX_MOVEMENTS 50
+#define NUM_DISKS 5
+#define NUM_PEGS 3
+#define MAX_MOVEMENTS 1000
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
@@ -24,6 +24,7 @@ typedef struct {
     float episode_return; // sum of agent rewards over episode
     float episode_length; // number of steps in episode
     float n; // Required as the last field
+    float episode_movements; // Number of movements in the episode
 } Log;
 
 typedef struct {
@@ -55,6 +56,7 @@ void add_log(Hanoi* env) {
     env->log.episode_length += 1.0f;
     env->log.episode_return += env->rewards[0];
     env->log.n += 1.0f;
+    env->log.episode_movements += env->moves;
 }
 
 float random_float(float low, float high) {
@@ -116,6 +118,9 @@ void c_reset(Hanoi* env) {
 }
 
 void c_step(Hanoi* env) {
+
+    env->moves++;
+
     // printf("STEP!\n");
     int from_peg = env->actions[0];
     int to_peg = env->actions[1];
@@ -155,8 +160,6 @@ void c_step(Hanoi* env) {
     env->pegs[to_peg].disk_count++;
     // printf("Disk %d moved successfully.\n", disk_to_move);
 
-    env->moves++;
-
     // Check if game is won
     bool terminated = env->pegs[NUM_PEGS - 1].disk_count == NUM_DISKS;
     // Check truncated
@@ -167,7 +170,7 @@ void c_step(Hanoi* env) {
     // We reward the agent by making less moves
     //env->rewards[0] = truncated ? -1.0f : 1.0f - ((float)env->moves / MAX_MOVEMENTS); // less movements, higher reward
     if (terminated) {
-        env->rewards[0] = 10.0f; // Large reward for winning
+        env->rewards[0] = 10.0f*(1.0f - (float)env->moves / (float)MAX_MOVEMENTS); // Large reward for winning, but also penalize for moves
     } else if (truncated) {
         env->rewards[0] = -5.0f; // Larger penalty for running out of moves
     } else {
