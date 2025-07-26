@@ -119,6 +119,23 @@ void c_reset(Hanoi* env) {
     init_disk_colors(env);
 }
 
+float compute_disks_reward(Hanoi* env) {
+    // This method returns a reward based on the number of disks on the last peg
+	Peg last_peg = env->pegs[NUM_PEGS - 1];
+	if(last_peg.disk_count == 0) {
+		return 0.0f;
+	}
+
+	float reward = 0.0f;
+	for(int i = 0; i < last_peg.disk_count; i++) {
+		int disk_id = last_peg.disks[i];
+		if(disk_id == NUM_DISKS - 1 - i) {
+			reward += 1.0f;
+		}
+	}
+	return reward;
+}
+
 void c_step(Hanoi* env) {
 
     // printf("STEP!\n");
@@ -152,6 +169,9 @@ void c_step(Hanoi* env) {
         }
     }
 
+	// Compute old state disks reward
+	float old_disks_reward = compute_disks_reward(env);
+
     // Move disk
     // printf("Moving disk %d from peg %d to peg %d\n", disk_to_move, from_peg, to_peg);
     env->pegs[from_peg].disks[env->pegs[from_peg].disk_count - 1] = -1; // Remove disk from the peg
@@ -162,6 +182,8 @@ void c_step(Hanoi* env) {
 
 	env->moves++;
 
+	// Compute new state disks reward
+	float new_disks_reward = compute_disks_reward(env);
 
     // Check if game is won
     bool terminated = env->pegs[NUM_PEGS - 1].disk_count == NUM_DISKS;
@@ -178,8 +200,11 @@ void c_step(Hanoi* env) {
     } else if (truncated) {
         env->rewards[0] = -20.0f; // Larger penalty for running out of moves
     } else {
-        // Give a small positive reward for making a valid move.
-        env->rewards[0] = 0.1f - (0.01f * env->moves);
+		// Disks reward
+		float diff = (new_disks_reward - old_disks_reward);
+
+        // Give a positive reward for making a valid move.
+        env->rewards[0] += 0.5f - 0.1f * diff;
     }
     env->terminals[0] = terminated ? 1 : 0;
     if(env->truncations) {
