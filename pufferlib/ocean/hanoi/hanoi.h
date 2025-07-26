@@ -47,6 +47,7 @@ typedef struct {
 
     int moves;
     int size;
+    bool won;
 } Hanoi;
 
 // Add episode statistics to log
@@ -113,13 +114,12 @@ void c_reset(Hanoi* env) {
 
     env->moves = 0;
     env->rewards[0] = 0.0f; // Reset reward
+    env->won = false;
 
     init_disk_colors(env);
 }
 
 void c_step(Hanoi* env) {
-
-    env->moves++;
 
     // printf("STEP!\n");
     int from_peg = env->actions[0];
@@ -139,7 +139,7 @@ void c_step(Hanoi* env) {
     }
     // printf("Possible: Current disk count on peg %d: %d\n", from_peg, env->pegs[from_peg].disk_count);
 
-    // Get top disk
+    // Get top disky
     int disk_to_move = env->pegs[from_peg].disks[env->pegs[from_peg].disk_count - 1];
 
     // If to_peg is not empty, check if move is valid (no larger disk on top)
@@ -147,7 +147,7 @@ void c_step(Hanoi* env) {
         int top_disk = env->pegs[to_peg].disks[env->pegs[to_peg].disk_count - 1];
         if(disk_to_move > top_disk) {
             // Invalid move, larger disk on top
-            env->rewards[0] = -1.0f; // Assign a smaller, but significant, penalty
+            env->rewards[0] -= -1.0f; // Assign a smaller, but significant, penalty
             return;
         }
     }
@@ -160,6 +160,9 @@ void c_step(Hanoi* env) {
     env->pegs[to_peg].disk_count++;
     // printf("Disk %d moved successfully.\n", disk_to_move);
 
+	env->moves++;
+
+
     // Check if game is won
     bool terminated = env->pegs[NUM_PEGS - 1].disk_count == NUM_DISKS;
     // Check truncated
@@ -171,8 +174,9 @@ void c_step(Hanoi* env) {
     //env->rewards[0] = truncated ? -1.0f : 1.0f - ((float)env->moves / MAX_MOVEMENTS); // less movements, higher reward
     if (terminated) {
         env->rewards[0] = 10.0f*(1.0f - (float)env->moves / (float)MAX_MOVEMENTS); // Large reward for winning, but also penalize for moves
+        env->won = true;
     } else if (truncated) {
-        env->rewards[0] = -5.0f; // Larger penalty for running out of moves
+        env->rewards[0] = -20.0f; // Larger penalty for running out of moves
     } else {
         // Give a small positive reward for making a valid move.
         env->rewards[0] = 0.1f - (0.01f * env->moves);
@@ -274,6 +278,6 @@ void c_render(Hanoi* env) {
     // Pause execution so we can see the movements
     struct timespec req;
     req.tv_sec = 0;
-    req.tv_nsec = 100 * 1000 * 1000; // 500 ms
+    req.tv_nsec = 500 * 1000 * 1000; // 500 ms
     nanosleep(&req, NULL);
 }
