@@ -31,7 +31,7 @@
 #define BALL_RADIUS 32 // Ball radius in pixels
 #define WINDOW_WIDTH 400
 #define WINDOW_HEIGHT 600
-#define DAMPING_COEFF 0.7f // damping coefficient for velocity
+#define DAMPING_COEFF 0.5f // damping coefficient for velocity
 
 // Log struct for PufferLib
 typedef struct {
@@ -79,6 +79,7 @@ void c_reset(MagLev* env) {
     env->x = random_float(-0.6f, 0.3f); // start at any position but at the bottom
     env->v = 0.0f; // start almost at rest
 
+
     env->target = random_float(-0.5f, 0.5f);
 
     env->m = random_float(-1.0f, 1.0f);
@@ -89,7 +90,7 @@ void c_reset(MagLev* env) {
     env->actions[0] = random_float(-1.0f, 1.0f); // Random initial current
     env->observations[0] = env->x; // position
     env->observations[1] = env->v; // velocity
-    env->observations[2] = env->target; // target pos
+    env->observations[2] = fabsf(env->x - env->target); // distance to target
     env->observations[3] = env->m;
 
     env->rewards[0] = 0.0f;
@@ -159,7 +160,7 @@ void c_step(MagLev* env) {
     // Only padd a high penalty if the sim is terminated (out of window, too much velocity, etc)
     // If sim is ended because of max_steps, it means that the ball remained in the window so just add a penalty
     // based on the distance to the target, velocity and action
-    env->rewards[0] = terminated ? -10.0f : 1.0f -dist_penalty - vel_penalty - action_penalty;
+    env->rewards[0] = terminated ? -1.0f : 1.0f -dist_penalty - vel_penalty;
 
     env->terminals[0] = terminated ? 1 : 0;
 
@@ -172,7 +173,7 @@ void c_step(MagLev* env) {
         // Update observations
         env->observations[0] = env->x;
         env->observations[1] = env->v;
-        env->observations[2] = env->target;
+        env->observations[2] = fabsf(env->x - env->target);
         env->observations[3] = env->m;
     }
 }
