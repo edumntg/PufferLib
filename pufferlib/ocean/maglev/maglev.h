@@ -153,7 +153,7 @@ void c_step(MagLev* env) {
 
     // Reward: penalize distance from target, velocity, and current usage
     //env->rewards[0] = terminated ? -1.0f : Y_MAX - fabsf(env->x - Y_TARGET) - fabsf(env->v) / V_MAX - fabsf(a) / I_MAX;
-    float dist_penalty = denormalize(fabsf(env->x - env->target), Y_MIN, Y_MAX);
+    float dist_penalty = 2.0f*denormalize(fabsf(env->x - env->target), Y_MIN, Y_MAX);
     float vel_penalty = 0.1f * denormalize(fabsf(env->v), V_MIN, V_MAX);
     float action_penalty = 0.01f * denormalize(fabsf(env->actions[0]), I_MIN, I_MAX);
 
