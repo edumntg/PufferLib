@@ -5,19 +5,20 @@
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
     env->size = 1; // default
     if (kwargs && PyDict_Check(kwargs)) {
-        PyObject* size_obj = PyDict_GetItemString(kwargs, "size");
-        if (size_obj && PyLong_Check(size_obj)) {
-            env->size = (int)PyLong_AsLong(size_obj);
+        PyObject* disks_obj = PyDict_GetItemString(kwargs, "num_disks");
+        if (disks_obj && PyLong_Check(disks_obj)) {
+            env->num_disks = (int)PyLong_AsLong(disks_obj);
+        }
+        PyObject* pegs_obj = PyDict_GetItemString(kwargs, "num_pegs");
+        if (pegs_obj && PyLong_Check(pegs_obj)) {
+            env->num_pegs = (int)PyLong_AsLong(pegs_obj);
         }
     }
     return 0;
 }
 
 static int my_log(PyObject* dict, Log* log) {
-    assign_to_dict(dict, "perf", log->perf);
     assign_to_dict(dict, "score", log->score);
-    assign_to_dict(dict, "episode_return", log->episode_return);
-    assign_to_dict(dict, "episode_length", log->episode_length);
     assign_to_dict(dict, "n", log->n);
     assign_to_dict(dict, "episode_movements", log->episode_movements);
     return 0;

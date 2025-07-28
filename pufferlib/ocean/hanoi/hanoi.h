@@ -10,8 +10,6 @@
 #include "raylib.h"
 #include <time.h>
 
-#define NUM_DISKS 5
-#define NUM_PEGS 3
 #define MAX_MOVEMENTS 1000
 
 #define SCREEN_WIDTH 800
@@ -19,16 +17,13 @@
 
 // Log struct for PufferLib
 typedef struct {
-    float perf; // 0-1 normalized performance metric
     float score; // unnormalized score
-    float episode_return; // sum of agent rewards over episode
-    float episode_length; // number of steps in episode
     float n; // Required as the last field
     float episode_movements; // Number of movements in the episode
 } Log;
 
 typedef struct {
-    int disks[NUM_DISKS]; // Array to hold the disks on each peg
+    int* disks; // Array to hold the disks on each peg
     int disk_count; // Number of disks on the peg
 } Peg;
 
@@ -41,13 +36,16 @@ typedef struct {
     unsigned char* terminals; // [done]
     unsigned char* truncations; // [truncated] (optional, but recommended)
 
-    Peg pegs[NUM_PEGS];
+    Peg* pegs;
 
-    Color disk_colors[NUM_DISKS]; // Colors for each disk
+    Color* disk_colors; // Colors for each disk
 
     int moves;
     int size;
     bool won;
+
+    int num_disks;
+    int num_pegs;
 } Hanoi;
 
 // Add episode statistics to log

@@ -5,19 +5,16 @@ import pufferlib
 from pufferlib.ocean.hanoi import binding
 
 class Hanoi(pufferlib.PufferEnv):
-    def __init__(self, num_envs=4096, render_mode=None, log_interval=128, size=2, buf=None, seed=0):
-        NUM_DISKS = 5
-        NUM_PEGS = 3
-        self.single_observation_space = gymnasium.spaces.Box(low=-1, high=NUM_DISKS - 1,
-                                                             shape=(NUM_PEGS * NUM_DISKS,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.MultiDiscrete([NUM_PEGS, NUM_PEGS])
+    def __init__(self, num_envs=1, render_mode=None, num_disks = 3, num_pegs = 3, buf=None, seed=0):
+        self.single_observation_space = gymnasium.spaces.Box(low=-1, high=num_disks - 1,
+                                                             shape=(num_pegs * num_disks,), dtype=np.float32)
+        self.single_action_space = gymnasium.spaces.MultiDiscrete([num_pegs, num_pegs])
         self.render_mode = render_mode
         self.num_agents = num_envs
-        self.log_interval = log_interval
 
         super().__init__(buf)
         self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
-                                       self.terminals, self.truncations, num_envs, seed, size=size)
+                                       self.terminals, self.truncations, num_envs, seed, num_disks = num_disks, num_pegs = num_pegs)
 
     def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
