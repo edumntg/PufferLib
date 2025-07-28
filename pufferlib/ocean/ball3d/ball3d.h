@@ -3,9 +3,11 @@
 #include "raylib.h"
 #include <math.h>
 
-#define MAX_MOVEMENTS 128
+#define MAX_MOVEMENTS 1024
 #define WIDTH 1080
 #define HEIGHT 720
+#define MIN_GOAL_POS -10.0f
+#define MAX_GOAL_POS 10.0f
 
 const Color PUFF_RED = (Color){187, 0, 0, 255};
 const Color PUFF_CYAN = (Color){0, 187, 187, 255};
@@ -138,23 +140,22 @@ void handle_camera_controls(Client *client) {
 }
 
 void c_reset(Ball3D* env) {
-    env->pos.x = rndf(-1.0f, 1.0f);
-    env->pos.y = rndf(-1.0f, 1.0f);
-    env->pos.z = rndf(-1.0f, 1.0f);
+    float dist = 25.0f;
+    do {
+        env->pos.x = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+        env->pos.y = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+        env->pos.z = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
 
-    env->goal.x = rndf(-1.0f, 1.0f);
-    env->goal.y = rndf(-1.0f, 1.0f);
-    env->goal.z = rndf(-1.0f, 1.0f);
+        env->goal.x = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+        env->goal.y = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+        env->goal.z = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+        dist = norm3(sub3(env->pos, env->goal));
+    } while(dist > 20.0f);
 
     // Initialize observations
     env->observations[0] = env->pos.x - env->goal.x;
     env->observations[1] = env->pos.y - env->goal.y;
     env->observations[2] = env->pos.z - env->goal.z;
-
-    // Initialize actions (Velocities)
-    env->actions[0] = rndf(-1.0f, 1.0f);
-    env->actions[1] = rndf(-1.0f, 1.0f);
-    env->actions[2] = rndf(-1.0f, 1.0f);
 
     env->ticks = 0;
 
@@ -162,57 +163,49 @@ void c_reset(Ball3D* env) {
     env->terminals[0] = 0;
 }
 
+void reset_ball(Ball3D* env) {
+    env->pos.x = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+    env->pos.y = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+    env->pos.z = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+}
+
 void c_step(Ball3D* env) {
     env->ticks++;
 
-    /*if(env->ticks >= MAX_MOVEMENTS) {
+    if(env->ticks >= MAX_MOVEMENTS) {
         c_reset(env);
         env->rewards[0] = -1.0f;
         env->terminals[0] = 1;
-        env->log.n += 1;
+        env->log.n += 1.0f;
         return;
-    }*/
+    }
 
     // Update ball positions
-    env->pos.x += env->actions[0] * 0.1f;
-    env->pos.y += env->actions[1] * 0.1f;
-    env->pos.z += env->actions[2] * 0.1f;
+    env->pos.x += env->actions[0];
+    env->pos.y += env->actions[1];
+    env->pos.z += env->actions[2];
 
     // compute distance to goal
     float dist = norm3(sub3(env->pos, env->goal));
-    /*if(dist <= 0.1f) {
-        c_reset(env);
-        env->rewards[0] = 1.0f;
-        env->terminals[0] = 1;
-        env->log.n += 1;
-        env->log.score += 1.0f;
-        return;
-    }*/
-
-    /*if(dist >= 2.0f) {
-        c_reset(env);
+    if(dist > 20.0f) {
+        reset_ball(env);
         env->rewards[0] = -1.0f;
         env->terminals[0] = 1;
-        env->log.n += 1;
-        return;
-    }*/
-
-    bool terminated = dist <= 0.5f;
-    bool truncated = dist >= 2.0f || env->ticks >= MAX_MOVEMENTS;
-    bool done = terminated || truncated;
-
-    env->rewards[0] = truncated ? -1.0f : (terminated ? 1.0f : -dist);
-    env->terminals[0] = done ? 1 : 0;
-
-    if(done) {
-        add_log(env);
-        c_reset(env);
-    } else {
-        // Update observations
-        env->observations[0] = env->pos.x - env->goal.x;
-        env->observations[1] = env->pos.y - env->goal.y;
-        env->observations[2] = env->pos.z - env->goal.z;
+        env->log.n += 1.0f;
     }
+
+    if(dist < 1.0f) {
+        reset_ball(env);
+        env->rewards[0] = 1.0f;
+        env->terminals[0] = 1;
+        env->log.score += 1.0f;
+        env->log.n += 1.0f;
+    }
+
+    // Update observations
+    env->observations[0] = env->pos.x - env->goal.x;
+    env->observations[1] = env->pos.y - env->goal.y;
+    env->observations[2] = env->pos.z - env->goal.z;
 }
 
 void c_close(Ball3D* env) {
@@ -277,5 +270,7 @@ void c_render(Ball3D* env) {
     DrawText("Left click + drag: Rotate camera", 10, 10, 16, PUFF_WHITE);
     DrawText("Mouse wheel: Zoom in/out", 10, 30, 16, PUFF_WHITE);
 
+    float dist = norm3(sub3(env->pos, env->goal));
+    DrawText(TextFormat("Distance: %.4f", dist), 10, 50, 16, PUFF_WHITE);
     EndDrawing();
 }
