@@ -156,6 +156,7 @@ MAKE_FUNCTIONS = {
     'asteroids': 'Asteroids',
     'spaces': make_spaces,
     'multiagent': make_multiagent,
+    'ball3d': 'Ball3D'
 }
 
 def env_creator(name='squared', *args, **kwargs):
