@@ -30,10 +30,7 @@ struct Client {
 // Only use floats!
 typedef struct {
     float score;
-    float n; // Required as the last field
-    float episode_length;
-    float episode_return;
-    float perf;
+    float n;
 } Log;
 
 typedef struct {
@@ -48,23 +45,14 @@ typedef struct {
     float* actions;                // Required field. Ensure type matches in .py and .c
     float* rewards;              // Required field
     unsigned char* terminals;    // Required field
-    int size;
+    int num_agents;
 
     Vec3 goal;
-    Vec3 pos; // ball pos
+    Vec3* pos; // ball pos
     int ticks;
 
     Client* client;
 } Ball3D;
-
-// Add episode statistics to log
-void add_log(Ball3D* env) {
-    env->log.perf += (env->rewards[0] > 0) ? 1.0f : 0.0f;
-    env->log.score += env->rewards[0];
-    env->log.episode_length += 1.0f;
-    env->log.episode_return += env->rewards[0];
-    env->log.n += 1.0f;
-}
 
 static inline float clampf(float v, float min, float max) {
     if (v < min)
@@ -139,73 +127,75 @@ void handle_camera_controls(Client *client) {
     }
 }
 
-void c_reset(Ball3D* env) {
-    float dist = 25.0f;
-    do {
-        env->pos.x = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
-        env->pos.y = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
-        env->pos.z = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
-
-        env->goal.x = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
-        env->goal.y = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
-        env->goal.z = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
-        dist = norm3(sub3(env->pos, env->goal));
-    } while(dist > 20.0f);
-
-    // Initialize observations
-    env->observations[0] = env->pos.x - env->goal.x;
-    env->observations[1] = env->pos.y - env->goal.y;
-    env->observations[2] = env->pos.z - env->goal.z;
-
-    env->ticks = 0;
-
-    env->rewards[0] = 0.0f;
-    env->terminals[0] = 0;
+void compute_observations(Ball3D* env) {
+    for(int i = 0; i < env->num_agents; i++) {
+        env->observations[i * 3] = env->pos[i].x - env->goal.x;
+        env->observations[i * 3 + 1] = env->pos[i].y - env->goal.y;
+        env->observations[i * 3 + 2] = env->pos[i].z - env->goal.z;
+    }
 }
 
-void reset_ball(Ball3D* env) {
-    env->pos.x = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
-    env->pos.y = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
-    env->pos.z = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+void reset_ball(Ball3D* env, int idx) {
+	env->pos[idx].x = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+    env->pos[idx].y = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+    env->pos[idx].z = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+}
+
+void c_reset(Ball3D* env) {
+
+	for(int i = 0; i < env->num_agents; i++) {
+        reset_ball(env, i);
+    }
+
+    env->goal.x = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+    env->goal.y = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+    env->goal.z = rndf(MIN_GOAL_POS, MAX_GOAL_POS);
+
+    env->ticks = 0;
 }
 
 void c_step(Ball3D* env) {
     env->ticks++;
-
     if(env->ticks >= MAX_MOVEMENTS) {
         c_reset(env);
-        env->rewards[0] = -1.0f;
-        env->terminals[0] = 1;
-        env->log.n += 1.0f;
+		for(int i = 0; i < env->num_agents; i++) {
+            env->rewards[i] = -1.0f;
+            env->terminals[i] = 1;
+			env->log.n += 1;
+        }
         return;
     }
 
     // Update ball positions
-    env->pos.x += env->actions[0];
-    env->pos.y += env->actions[1];
-    env->pos.z += env->actions[2];
-
-    // compute distance to goal
-    float dist = norm3(sub3(env->pos, env->goal));
-    if(dist > 20.0f) {
-        reset_ball(env);
-        env->rewards[0] = -1.0f;
-        env->terminals[0] = 1;
-        env->log.n += 1.0f;
+	for(int i = 0; i < env->num_agents; i++) {
+		env->rewards[i] = 0.0f;
+        env->terminals[i] = 0;
+        env->pos[i].x += env->actions[i * 3];
+        env->pos[i].y += env->actions[i * 3 + 1];
+        env->pos[i].z += env->actions[i * 3 + 2];
     }
 
-    if(dist < 1.0f) {
-        reset_ball(env);
-        env->rewards[0] = 1.0f;
-        env->terminals[0] = 1;
-        env->log.score += 1.0f;
-        env->log.n += 1.0f;
+    // compute rewards
+	for(int i = 0; i < env->num_agents; i++) {
+        float dist = norm3(sub3(env->pos[i], env->goal));
+        if (dist < 1.0f) {
+            env->rewards[i] = 1.0f;
+            env->terminals[i] = 1;
+            env->log.score += 1.0f;
+            env->log.n += 1;
+            reset_ball(env, i);
+		}
+
+		if (dist > 20.0f) {
+            reset_ball(env, i);
+            env->rewards[i] = -1.0f;
+            env->terminals[i] = 1;
+            env->log.n += 1;
+        }
     }
 
-    // Update observations
-    env->observations[0] = env->pos.x - env->goal.x;
-    env->observations[1] = env->pos.y - env->goal.y;
-    env->observations[2] = env->pos.z - env->goal.z;
+    // compute observations
+	compute_observations(env);
 }
 
 void c_close(Ball3D* env) {
@@ -262,7 +252,9 @@ void c_render(Ball3D* env) {
     BeginMode3D(client->camera);
     DrawCubeWires((Vector3){0.0f, 0.0f, 0.0f}, 20.0f, 20.0f, 20.0f, WHITE);
 
-    DrawSphere((Vector3){env->pos.x, env->pos.y, env->pos.z}, 0.5f, PUFF_CYAN);
+	for(int i = 0; i < env->num_agents; i++) {
+        DrawSphere((Vector3){env->pos[i].x, env->pos[i].y, env->pos[i].z}, 0.5f, PUFF_CYAN);
+    }
 
     DrawSphere((Vector3){env->goal.x, env->goal.y, env->goal.z}, 0.5f, PUFF_RED);
     EndMode3D();
@@ -270,7 +262,7 @@ void c_render(Ball3D* env) {
     DrawText("Left click + drag: Rotate camera", 10, 10, 16, PUFF_WHITE);
     DrawText("Mouse wheel: Zoom in/out", 10, 30, 16, PUFF_WHITE);
 
-    float dist = norm3(sub3(env->pos, env->goal));
-    DrawText(TextFormat("Distance: %.4f", dist), 10, 50, 16, PUFF_WHITE);
+    //float dist = norm3(sub3(env->pos, env->goal));
+   // DrawText(TextFormat("Distance: %.4f", dist), 10, 50, 16, PUFF_WHITE);
     EndDrawing();
 }

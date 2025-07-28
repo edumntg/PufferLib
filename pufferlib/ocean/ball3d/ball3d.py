@@ -7,17 +7,27 @@ import pufferlib
 from pufferlib.ocean.ball3d import binding
 
 class Ball3D(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=5, buf=None, seed=0):
+    def __init__(self, num_envs=1, render_mode=None, buf=None, seed=0, num_balls = 2):
         self.single_observation_space = gymnasium.spaces.Box(low=-20.0, high=20.0,
             shape=(3,), dtype=np.float32)
         self.single_action_space = gymnasium.spaces.Box(low = -1.0, high = 1.0, shape = (3,), dtype = np.float32)
         self.render_mode = render_mode
-        self.num_agents = num_envs
+        self.num_agents = num_envs*num_balls
 
         super().__init__(buf)
-        self.c_envs = binding.vec_init(self.observations, self.actions, self.rewards,
-            self.terminals, self.truncations, num_envs, seed, size=size)
-        self.size = size
+        c_envs = []
+        for i in range(num_envs):
+            c_envs.append(binding.env_init(
+                self.observations[i*num_balls:(i+1)*num_balls],
+                self.actions[i*num_balls:(i+1)*num_balls],
+                self.rewards[i*num_balls:(i+1)*num_balls],
+                self.terminals[i*num_balls:(i+1)*num_balls],
+                self.truncations[i*num_balls:(i+1)*num_balls],
+                i,
+                num_agents=num_balls,
+            ))
+
+        self.c_envs = binding.vectorize(*c_envs)
  
     def reset(self, seed=0):
         binding.vec_reset(self.c_envs, seed)
