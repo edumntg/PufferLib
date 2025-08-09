@@ -14,12 +14,14 @@ static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
             env->num_pegs = (int)PyLong_AsLong(pegs_obj);
         }
     }
+    init(env);
     return 0;
 }
 
 static int my_log(PyObject* dict, Log* log) {
+    assign_to_dict(dict, "perf", log->perf);
     assign_to_dict(dict, "score", log->score);
     assign_to_dict(dict, "n", log->n);
-    assign_to_dict(dict, "episode_movements", log->episode_movements);
+    assign_to_dict(dict, "episode_length", log->episode_length);
     return 0;
 }

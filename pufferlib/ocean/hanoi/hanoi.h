@@ -10,16 +10,18 @@
 #include "raylib.h"
 #include <time.h>
 
-#define MAX_MOVEMENTS 1000
+#define MAX_MOVEMENTS 150
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
 
 // Log struct for PufferLib
 typedef struct {
+    float perf;
     float score; // unnormalized score
     float n; // Required as the last field
-    float episode_movements; // Number of movements in the episode
+    float episode_length; // Number of movements in the episode
+    float episode_return; // Total reward in the episode
 } Log;
 
 typedef struct {
@@ -52,10 +54,9 @@ typedef struct {
 void add_log(Hanoi* env) {
     env->log.perf += (env->rewards[0] > 0) ? 1.0f : 0.0f;
     env->log.score += env->rewards[0];
-    env->log.episode_length += 1.0f;
+    env->log.episode_length = env->moves;;
     env->log.episode_return += env->rewards[0];
     env->log.n += 1.0f;
-    env->log.episode_movements += env->moves;
 }
 
 float random_float(float low, float high) {
@@ -68,7 +69,7 @@ int random_int(int low, int high) {
 
 void init_disk_colors(Hanoi* env) {
     // Initialize colors for disks using random colors
-    for(int i = 0; i < NUM_DISKS; i++) {
+    for(int i = 0; i < env->num_disks; i++) {
         env->disk_colors[i].r = (unsigned char)random_float(0, 255);
         env->disk_colors[i].g = (unsigned char)random_float(0, 255);
         env->disk_colors[i].b = (unsigned char)random_float(0, 255);
@@ -76,50 +77,66 @@ void init_disk_colors(Hanoi* env) {
     }
 }
 
-void c_reset(Hanoi* env) {
-
-    // Reset
-    env->actions[0] = 0; // Always start at first peg
-    env->actions[1] = random_int(1, NUM_PEGS - 1); // Randomly select to peg except first one
-
-    // Clear pegs
-    memset(env->pegs, 0, sizeof(Peg) * NUM_PEGS);
-    for(int i = 0; i < NUM_PEGS; i++) {
+void init(Hanoi* env) {
+    // Initialize pegs
+    env->pegs = (Peg*)malloc(sizeof(Peg) * env->num_pegs);
+    for(int i = 0; i < env->num_pegs; i++) {
         env->pegs[i].disk_count = 0;
-        memset(env->pegs[i].disks, -1, sizeof(int) * NUM_DISKS); // Initialize with -1 (no disks)
+        env->pegs[i].disks = (int*)malloc(sizeof(int) * env->num_disks);
+        for(int j = 0; j < env->num_disks; j++) {
+            env->pegs[i].disks[j] = -1; // Initialize with -1 (no disks)
+        }
     }
 
     // Place all disks in the first peg
-    for(int i = 0; i < NUM_DISKS; i++) {
-        int disk_idx = NUM_DISKS - i - 1;
+    for(int i = 0; i < env->num_disks; i++) {
+        int disk_idx = env->num_disks - i - 1; // From largest to smallest
+        env->pegs[0].disks[i] = disk_idx;
+        env->pegs[0].disk_count++;
+    }
+
+    // Initialize disk colors
+    env->disk_colors = (Color*)malloc(sizeof(Color) * env->num_disks);
+    init_disk_colors(env);
+}
+
+void c_reset(Hanoi* env) {
+    // Clear pegs
+    for(int i = 0; i < env->num_pegs; i++) {
+        env->pegs[i].disk_count = 0;
+        for(int j = 0; j < env->num_disks; j++) {
+            env->pegs[i].disks[j] = -1; // Reset disks
+        }
+    }
+
+    // Place all disks in the first peg
+    for(int i = 0; i < env->num_disks; i++) {
+        int disk_idx = env->num_disks - i - 1;
         env->pegs[0].disks[i] = disk_idx; // From largest to smallest
         env->pegs[0].disk_count++;
     }
 
     // First, reset observations to an "empty" value like -1
-    for (int i = 0; i < NUM_PEGS * NUM_DISKS; i++) {
+    for (int i = 0; i < env->num_pegs * env->num_disks; i++) {
         env->observations[i] = -1.0f;
     }
 
     // Then, fill in the current disk positions
-    for (int i = 0; i < NUM_PEGS; i++) { // For each peg
+    for (int i = 0; i < env->num_pegs; i++) { // For each peg
         for (int j = 0; j < env->pegs[i].disk_count; j++) { // For each disk on that peg
             int disk_id = env->pegs[i].disks[j];
             // The observation encodes the peg, the position in the stack, and the disk id
-            env->observations[i * NUM_DISKS + j] = (float)disk_id;
+            env->observations[i * env->num_disks + j] = (float)disk_id;
         }
     }
 
     env->moves = 0;
     env->rewards[0] = 0.0f; // Reset reward
-    env->won = false;
-
-    init_disk_colors(env);
 }
 
 float compute_disks_reward(Hanoi* env) {
     // This method returns a reward based on the number of disks on the last peg
-	Peg last_peg = env->pegs[NUM_PEGS - 1];
+	Peg last_peg = env->pegs[env->num_pegs - 1];
 	if(last_peg.disk_count == 0) {
 		return 0.0f;
 	}
@@ -127,7 +144,7 @@ float compute_disks_reward(Hanoi* env) {
 	float reward = 0.0f;
 	for(int i = 0; i < last_peg.disk_count; i++) {
 		int disk_id = last_peg.disks[i];
-		if(disk_id == NUM_DISKS - 1 - i) {
+		if(disk_id == env->num_disks - 1 - i) {
 			reward += 1.0f;
 		}
 	}
@@ -136,23 +153,17 @@ float compute_disks_reward(Hanoi* env) {
 
 void c_step(Hanoi* env) {
 
-    // printf("STEP!\n");
     int from_peg = env->actions[0];
     int to_peg = env->actions[1];
-    // printf("Checking if moving disk from peg %d to peg %d is possible\n", from_peg, to_peg);
+
+    env->moves++;
+
     if(env->pegs[from_peg].disk_count == 0) {
         // No disks to move from the selected peg
-        // printf("Attempting to move from an empty peg: %d\n", from_peg);
-        env->rewards[0] -= 0.01f; // Invalid action
-
+        env->rewards[0] = -1.0f; // Invalid action
         env->terminals[0] = 0;
-        if(env->truncations) {
-            env->truncations[0] = 0;
-        }
-
         return;
     }
-    // printf("Possible: Current disk count on peg %d: %d\n", from_peg, env->pegs[from_peg].disk_count);
 
     // Get top disky
     int disk_to_move = env->pegs[from_peg].disks[env->pegs[from_peg].disk_count - 1];
@@ -162,74 +173,57 @@ void c_step(Hanoi* env) {
         int top_disk = env->pegs[to_peg].disks[env->pegs[to_peg].disk_count - 1];
         if(disk_to_move > top_disk) {
             // Invalid move, larger disk on top
-            env->rewards[0] -= -1.0f; // Assign a smaller, but significant, penalty
+            env->rewards[0] = -1.0f; // Assign a smaller, but significant, penalty
+            env->terminals[0] = 0;
             return;
         }
     }
 
 	// Compute old state disks reward
-	float old_disks_reward = compute_disks_reward(env);
+	//float old_disks_reward = compute_disks_reward(env);
 
     // Move disk
-    // printf("Moving disk %d from peg %d to peg %d\n", disk_to_move, from_peg, to_peg);
     env->pegs[from_peg].disks[env->pegs[from_peg].disk_count - 1] = -1; // Remove disk from the peg
     env->pegs[from_peg].disk_count--;
     env->pegs[to_peg].disks[env->pegs[to_peg].disk_count] = disk_to_move;
     env->pegs[to_peg].disk_count++;
-    // printf("Disk %d moved successfully.\n", disk_to_move);
-
-	env->moves++;
 
 	// Compute new state disks reward
-	float new_disks_reward = compute_disks_reward(env);
+	//float new_disks_reward = compute_disks_reward(env);
 
-    // Check if game is won
-    bool terminated = env->pegs[NUM_PEGS - 1].disk_count == NUM_DISKS;
-    // Check truncated
-    bool truncated = env->moves >= MAX_MOVEMENTS;
-    bool done = terminated || truncated;
-    // printf("Game terminated: %d, truncated: %d\n", terminated, truncated);
+    // Small penalty for each movel to encourage efficiency
+    env->rewards[0] -= 0.1f;
 
     // We reward the agent by making less moves
-    //env->rewards[0] = truncated ? -1.0f : 1.0f - ((float)env->moves / MAX_MOVEMENTS); // less movements, higher reward
-    if (terminated) {
-        env->rewards[0] = 10.0f*(1.0f - (float)env->moves / (float)MAX_MOVEMENTS); // Large reward for winning, but also penalize for moves
-        env->won = true;
-    } else if (truncated) {
-        env->rewards[0] = -20.0f; // Larger penalty for running out of moves
-    } else {
-		// Disks reward
-		float diff = (new_disks_reward - old_disks_reward);
+    if (env->pegs[env->num_pegs - 1].disk_count == env->num_disks) {
+        env->rewards[0] = 10.0f;
+        env->terminals[0] = 1; // Episode is done
 
-        // Give a positive reward for making a valid move.
-        env->rewards[0] += 0.5f - 0.1f * diff;
-    }
-    env->terminals[0] = terminated ? 1 : 0;
-    if(env->truncations) {
-        env->truncations[0] = truncated ? 1 : 0;
-    }
-
-    if(done) {
         add_log(env);
         c_reset(env);
-    } else {
-        // Update observations
-        // printf("Updating observations...\n");
+        return;
+    }
 
-        // First, reset observations to an "empty" value
-        for (int i = 0; i < NUM_PEGS * NUM_DISKS; i++) {
-            env->observations[i] = -1.0f;
-        }
+    if(env->moves >= MAX_MOVEMENTS) {
+        env->rewards[0] = -10.0f; // Penalty for exceeding max movements
+        env->terminals[0] = 1; // Episode is done
+        add_log(env);
+        c_reset(env);
+        return;
+    }
 
-        // Then, fill in the current disk positions
-        for (int i = 0; i < NUM_PEGS; i++) { // For each peg
-            for (int j = 0; j < env->pegs[i].disk_count; j++) { // For each disk on that peg
-                int disk_id = env->pegs[i].disks[j];
-                // The observation encodes the peg, the position in the stack, and the disk id
-                env->observations[i * NUM_DISKS + j] = (float)disk_id;
-            }
+    // Update observations
+    for (int i = 0; i < env->num_pegs * env->num_disks; i++) {
+        env->observations[i] = -1.0f;
+    }
+
+    // Fill in the current disk positions
+    for (int i = 0; i < env->num_pegs; i++) { // For each peg
+        for (int j = 0; j < env->pegs[i].disk_count; j++) { // For each disk on that peg
+            int disk_id = env->pegs[i].disks[j];
+            // The observation encodes the peg, the position in the stack, and the disk id
+            env->observations[i * env->num_disks + j] = (float)disk_id;
         }
-        // printf("Observations updated.\n");
     }
 }
 
@@ -265,15 +259,15 @@ void c_render(Hanoi* env) {
     int peg_height = 300;
     int peg_y = SCREEN_HEIGHT - 100 - peg_height;
 
-    for (int i = 0; i < NUM_PEGS; i++) {
-        int peg_x = (SCREEN_WIDTH / (NUM_PEGS + 1)) * (i + 1);
+    for (int i = 0; i < env->num_pegs; i++) {
+        int peg_x = (SCREEN_WIDTH / (env->num_pegs + 1)) * (i + 1);
         DrawRectangle(peg_x - peg_width / 2, peg_y, peg_width, peg_height, GRAY);
     }
 
     // --- Draw Disks ---
     int disk_height = 25;
-    for (int i = 0; i < NUM_PEGS; i++) {
-        int peg_x = (SCREEN_WIDTH / (NUM_PEGS + 1)) * (i + 1);
+    for (int i = 0; i < env->num_pegs; i++) {
+        int peg_x = (SCREEN_WIDTH / (env->num_pegs + 1)) * (i + 1);
         for (int j = 0; j < env->pegs[i].disk_count; j++) {
             int disk_size = env->pegs[i].disks[j];
             int disk_width = 30 + disk_size * 25;

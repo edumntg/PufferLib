@@ -22,19 +22,9 @@ class Hanoi(pufferlib.PufferEnv):
         return self.observations, []
 
     def step(self, actions):
-        self.tick += 1
-
-        # Ensure actions are in the correct shape (num_envs, 2)
-        actions = np.asarray(actions)
-        if actions.ndim == 1:
-            actions = actions.reshape(-1, 2)
         self.actions[:] = actions
         binding.vec_step(self.c_envs)
-
-        info = []
-        if self.tick % self.log_interval == 0:
-            info.append(binding.vec_log(self.c_envs))
-
+        info = [binding.vec_log(self.c_envs)]
         return (self.observations, self.rewards,
                 self.terminals, self.truncations, info)
 
