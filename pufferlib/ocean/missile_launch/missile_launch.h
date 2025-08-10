@@ -8,19 +8,23 @@ const Color PUFF_CYAN = (Color){0, 187, 187, 255};
 const Color PUFF_WHITE = (Color){241, 241, 241, 241};
 const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
-// ISU values
+// Physics params
 const float ROCKET_LENGTH = 3.0f;
-const float ROCKET_THRUST = 800.0f;
+const float ROCKET_THRUST = 800.0f;  // magnitude
 const float GRAVITY = 9.81f;
 const float ROCKET_MASS = 20.0f;
+const float I = (1/12.0f) * ROCKET_MASS * (ROCKET_LENGTH * ROCKET_LENGTH); // MoI rod
 
-const float MAX_GIMBAL_ANGLE = 10.0f;
-
+// Controls/limits
+const float MAX_GIMBAL_ANGLE = 10.0f; // deg
 const float DT = 0.05f;
-
-const float I = (1/12.0f) * ROCKET_MASS * (ROCKET_LENGTH * ROCKET_LENGTH); // Moment of inertia of a rod about its center
-
 const int MAX_STEPS = 1000;
+
+// Stabilization/shaping
+const float ANGULAR_DAMPING = 2.0f;   // per-second damping on omega
+const float LINEAR_DAMPING  = 0.2f;   // per-second damping on v
+const float TORQUE_GAIN     = 0.2f;   // scale torque to reduce spin
+const float HIT_RADIUS      = 20.0f;  // pixels
 
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
@@ -37,27 +41,27 @@ typedef struct {
 } Vec2;
 
 static inline Vec2 add2(Vec2 a, Vec2 b) { return (Vec2){a.x + b.x, a.y + b.y}; }
-
 static inline Vec2 sub2(Vec2 a, Vec2 b) { return (Vec2){a.x - b.x, a.y - b.y}; }
-
 static inline Vec2 scalmul2(Vec2 a, float b) { return (Vec2){a.x * b, a.y * b}; }
-
 static inline float dot2(Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; }
-
 static inline float norm2(Vec2 a) { return sqrtf(dot2(a, a)); }
 
 static inline float clampf(float v, float min, float max) {
-    if (v < min)
-        return min;
-    if (v > max)
-        return max;
+    if (v < min) return min;
+    if (v > max) return max;
     return v;
+}
+
+static inline float wrap_pi(float a) {
+    while (a >  M_PI) a -= 2.0f*M_PI;
+    while (a < -M_PI) a += 2.0f*M_PI;
+    return a;
 }
 
 typedef struct {
     Log log;                     // Required field
-    float* observations; // Required field. Ensure type matches in .py and .c
-    float* actions;                // Required field. Ensure type matches in .py and .c
+    float* observations;         // Required field. Ensure type matches in .py and .c
+    float* actions;              // Required field. Ensure type matches in .py and .c
     float* rewards;              // Required field
     unsigned char* terminals;    // Required field
 
@@ -67,13 +71,30 @@ typedef struct {
 
     float theta; // pitch
     float omega; // angular velocity
+    float delta;
 
+    float prev_distance;
     int tick;
-
 } MissileLaunch;
 
+static inline void write_observations(MissileLaunch* env) {
+    // Observations:
+    // 0: dx, 1: dy, 2: vx, 3: vy, 4: angle_error, 5: omega
+    float dx = env->position.x - env->target.x;
+    float dy = env->position.y - env->target.y;
+    float angle_to_target = atan2f(env->target.y - env->position.y,
+                                   env->target.x - env->position.x);
+    float angle_error = wrap_pi(angle_to_target - env->theta);
+
+    env->observations[0] = dx;
+    env->observations[1] = dy;
+    env->observations[2] = env->velocity.x;
+    env->observations[3] = env->velocity.y;
+    env->observations[4] = angle_error;
+    env->observations[5] = env->omega;
+}
+
 void c_reset(MissileLaunch* env) {
-    // Reset the position and target
     env->position.x = 30.0f;
     env->position.y = 30.0f;
     env->velocity.x = 0.0f;
@@ -81,99 +102,88 @@ void c_reset(MissileLaunch* env) {
     env->theta = 0.0f;
     env->omega = 0.0f;
 
-    // Random target pos between the center of the screen to the right
-	env->target.x = (float)(rand() % (SCREEN_WIDTH / 2) + SCREEN_WIDTH / 2);
-	env->target.y = (float)(rand() % (SCREEN_HEIGHT - 30)); // Avoid the floor
+    // Random target pos in right half, avoid floor
+    env->target.x = (float)(rand() % (SCREEN_WIDTH / 2) + SCREEN_WIDTH / 2);
+    env->target.y = (float)(rand() % (SCREEN_HEIGHT - 30));
 
     env->tick = 0;
+
+    // Initialize distance and observations
+    env->prev_distance = norm2(sub2(env->position, env->target));
+    write_observations(env);
 }
 
 void c_step(MissileLaunch* env) {
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0;
-
     env->tick += 1;
 
-    // Get gimbal angle
+    // Action → gimbal angle in radians
     float delta = env->actions[0];
-
-    // Clamp
     delta = clampf(delta, -1.0f, 1.0f);
+    delta = delta * MAX_GIMBAL_ANGLE * (M_PI / 180.0f);
 
-    // De-normalize (Convert to degrees)
-    delta = delta * MAX_GIMBAL_ANGLE; // This is in degrees
+    env->delta = delta;
 
-    // Convert delta to radians for calculations
-    delta = delta * M_PI / 180.0f;
-
-    // Torque
-    float torque = (ROCKET_LENGTH / 2.0f) * ROCKET_THRUST * sinf(delta);
-
-    // Angular acceleration
+    // Torque and angular dynamics with damping
+    float torque = TORQUE_GAIN * (ROCKET_LENGTH / 2.0f) * ROCKET_THRUST * sinf(delta);
     float alpha = torque / I;
+    env->omega += (alpha - ANGULAR_DAMPING * env->omega) * DT;
+    env->theta = wrap_pi(env->theta + env->omega * DT);
 
-    // Angular velocity
-    env->omega += alpha * DT;
-    env->theta += env->omega * DT;
-
-    if(env->theta > 2.0f*M_PI) {
-        env->theta -= 2.0*M_PI;
-    }
-    if(env->theta < -2.0f*M_PI) {
-        env->theta += 2.0*M_PI;
-    }
-
-    // X-Y params
+    // Thrust components (body angle + gimbal) and gravity
     float thrust_x = ROCKET_THRUST * sinf(env->theta + delta);
     float thrust_y = ROCKET_THRUST * cosf(env->theta + delta) - (GRAVITY * ROCKET_MASS);
-    float acceleration_x = thrust_x / ROCKET_MASS;
-    float acceleration_y = thrust_y / ROCKET_MASS;
+    float ax = thrust_x / ROCKET_MASS;
+    float ay = thrust_y / ROCKET_MASS;
 
-    // Update velocity
-    env->velocity.x += acceleration_x * DT;
-    env->velocity.y += acceleration_y * DT;
+    // Linear dynamics + damping
+    env->velocity.x += ax * DT;
+    env->velocity.y += ay * DT;
+    env->velocity.x -= LINEAR_DAMPING * env->velocity.x * DT;
+    env->velocity.y -= LINEAR_DAMPING * env->velocity.y * DT;
 
-    // Update position
     env->position.x += env->velocity.x * DT;
     env->position.y += env->velocity.y * DT;
-    
-    // Now check if we hit the target
+
+    // Check target hit
     float dist_to_target = norm2(sub2(env->position, env->target));
-    if (dist_to_target < 1.0f) {
-        // Hit the target
+    if (dist_to_target < HIT_RADIUS) {
         env->rewards[0] = 1.0f;
         env->terminals[0] = 1;
         env->log.score += 1.0f;
         env->log.n += 1.0f;
-
-        // Reset
         c_reset(env);
         return;
     }
 
-    // Check if it is out of bounds
-    bool out_of_bounds = env->position.x < -10.0f || env->position.x > SCREEN_WIDTH + 10.0f || env->position.y < -10.0f || env->position.y > SCREEN_HEIGHT + 10.0f;
+    // Bounds / timeout
+    bool out_of_bounds = env->position.x < -10.0f || env->position.x > SCREEN_WIDTH + 10.0f
+      || env->position.y < -10.0f || env->position.y > SCREEN_HEIGHT + 10.0f;
 
-    if(env->tick >= MAX_STEPS || out_of_bounds) {
-        env->terminals[0] = 1; // Episode ends
-        env->rewards[0] = -1.0f; // Negative reward for not hitting target in time
-        env->log.n += 1;
-        env->log.score += env->rewards[0]; // Add the negative reward to the score
+    if (env->tick >= MAX_STEPS || out_of_bounds) {
+        env->terminals[0] = 1;
+        env->rewards[0] = -1.0f;
+        env->log.n += 1.0f;
+        env->log.score += env->rewards[0];
         c_reset(env);
         return;
     }
 
-    // No hit, so no reward
-    env->rewards[0] = -0.5f * dist_to_target; // Negative reward based on distance to target
-    env->terminals[0] = 0; // Not terminal
+    // Shaped reward: progress toward target, penalize angle error and spin
+    float angle_to_target = atan2f(env->target.y - env->position.y,
+                                   env->target.x - env->position.x);
+    float angle_error = wrap_pi(angle_to_target - env->theta);
+    float progress = env->prev_distance - dist_to_target;
 
-    // Update observations
-    env->observations[0] = env->position.x - env->target.x; // Relative x position to target
-    env->observations[1] = env->position.y - env->target.y;
-    env->observations[2] = env->velocity.x; // Velocity x
-    env->observations[3] = env->velocity.y;
-    env->observations[4] = env->theta; // Pitch angle
-    env->observations[5] = env->omega; // Angular velocity
+    env->rewards[0] = 0.05f * progress
+                    - 0.001f * fabsf(angle_error)
+                    - 0.0005f * fabsf(env->omega);
+
+    env->prev_distance = dist_to_target;
+
+    // Observations
+    write_observations(env);
 }
 
 void c_close(MissileLaunch* env) {
@@ -194,7 +204,6 @@ void c_render(MissileLaunch* env) {
     }
 
     if (IsKeyDown(KEY_ESCAPE)) {
-
         c_close(env);
         exit(0);
     }
@@ -211,44 +220,28 @@ void c_render(MissileLaunch* env) {
     Rectangle rect = {env->position.x, SCREEN_HEIGHT - env->position.y, rocket_render_width, rocket_render_length};
     Vector2 origin = {rocket_render_width / 2, rocket_render_length / 2}; // center
 
-    DrawRectanglePro(rect, origin, env->theta * 180.0f / M_PI, PUFF_CYAN);;
+    DrawRectanglePro(rect, origin, env->theta * 180.0f / M_PI, PUFF_CYAN);
 
-    // Draw a yellow smaller "fire"/cone at bottom of the rocket rotates based on the delta angle
-    // Get the gimbal angle from the actions array
-    float delta_action = env->actions[0];
-    delta_action = clampf(delta_action, -1.0f, 1.0f);
-    float delta_rad = delta_action * MAX_GIMBAL_ANGLE * M_PI / 180.0f; // Convert gimbal angle to radians
+    // Fire cone
+    float delta_action = clampf(env->actions[0], -1.0f, 1.0f);
+    float delta_rad = delta_action * MAX_GIMBAL_ANGLE * M_PI / 180.0f;
 
-    // Rocket's position on the screen
     Vector2 rocket_center = { env->position.x, SCREEN_HEIGHT - env->position.y };
-
-    // The rocket body's orientation angle is env->theta (already in radians)
     float rocket_angle_rad = env->theta;
-
-    // The thrust vector's orientation angle, which determines the fire's direction
     float combined_angle_rad = env->theta + delta_rad;
 
-    // Calculate the position of the rocket's base in screen coordinates
-    // The vector from center to base is (-L/2) rotated by rocket_angle_rad.
-    // Y is inverted for screen coordinates.
     float rocket_base_x = rocket_center.x - (rocket_render_length / 2.0f) * sinf(rocket_angle_rad);
     float rocket_base_y = rocket_center.y + (rocket_render_length / 2.0f) * cosf(rocket_angle_rad);
     Vector2 rocket_base = { rocket_base_x, rocket_base_y };
 
-    // Define the fire cone dimensions and position relative to the rocket's base
     float fire_length = 15.0f;
     float fire_width = 10.0f;
 
-    // Calculate the points of the triangle representing the fire.
-    // The fire cone points away from the base in the direction of thrust.
-    // Screen thrust vector: (sin(angle), cos(angle))
     Vector2 fire_tip = {
         rocket_base.x + fire_length * sinf(combined_angle_rad),
         rocket_base.y + fire_length * cosf(combined_angle_rad)
     };
 
-    // The base of the fire triangle is perpendicular to the thrust vector.
-    // Screen perpendicular vector: (cos(angle), -sin(angle))
     Vector2 base_left = {
         rocket_base.x + (fire_width / 2.0f) * cosf(combined_angle_rad),
         rocket_base.y - (fire_width / 2.0f) * sinf(combined_angle_rad)
@@ -259,28 +252,30 @@ void c_render(MissileLaunch* env) {
         rocket_base.y + (fire_width / 2.0f) * sinf(combined_angle_rad)
     };
 
-    // Draw the triangle
     DrawTriangle(fire_tip, base_left, base_right, ORANGE);
 
-    // Draw Target
-    DrawCircle(env->target.x, env->target.y, 5, PUFF_RED);
+    // Draw Target (fix y inversion)
+    DrawCircle(env->target.x, SCREEN_HEIGHT - env->target.y, 5, PUFF_RED);
 
-    char theta_text[32];
-    snprintf(theta_text, sizeof(theta_text), "theta = %.4f", env->theta * 180.0f / M_PI); // Convert to degrees for display
+    char theta_text[64];
+    snprintf(theta_text, sizeof(theta_text), "theta = %.2f deg", env->theta * 180.0f / M_PI);
     DrawText(theta_text, 10, 10, 20, (Color){255, 255, 255, 255});
 
-    // Now show velocity omega and pitch
     char velocity_text[64];
-    snprintf(velocity_text, sizeof(velocity_text), "Velocity: (%.2f, %.2f)", env->velocity.x, env->velocity.y);
+    snprintf(velocity_text, sizeof(velocity_text), "Vel: (%.2f, %.2f)", env->velocity.x, env->velocity.y);
     DrawText(velocity_text, 10, 40, 20, (Color){255, 255, 255, 255});
 
-    char omega_text[32];
-    snprintf(omega_text, sizeof(omega_text), "Omega = %.4f", env->omega);
+    char omega_text[64];
+    snprintf(omega_text, sizeof(omega_text), "Omega = %.3f", env->omega);
     DrawText(omega_text, 10, 70, 20, (Color){255, 255, 255, 255});
 
     char steps_text[32];
     snprintf(steps_text, sizeof(steps_text), "Steps = %d", env->tick);
     DrawText(steps_text, 10, 100, 20, (Color){255, 255, 255, 255});
+
+    char delta_text[32];
+    snprintf(delta_text, sizeof(delta_text), "Delta = %.4f", env->delta);
+    DrawText(delta_text, 10, 130, 20, (Color){255, 255, 255, 255});
 
     EndDrawing();
 }

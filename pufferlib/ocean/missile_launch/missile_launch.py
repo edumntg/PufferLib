@@ -8,9 +8,9 @@ from pufferlib.ocean.missile_launch import binding
 
 class MissileLaunch(pufferlib.PufferEnv):
     def __init__(self, num_envs=1, render_mode=None, log_interval=128, size=5, buf=None, seed=0):
-        self.single_observation_space = gymnasium.spaces.Box(low=-50.0, high=50.0,
-                                                             shape=(6,), dtype=np.float32)
-        self.single_action_space = gymnasium.spaces.Box(low = -1.0, high = 1.0, shape = (1,), dtype=np.float32)
+        high = np.array([1000, 1000, 200, 200, np.pi, 50], dtype=np.float32)
+        self.single_observation_space = gymnasium.spaces.Box(low=-high, high=high, shape=(6,), dtype=np.float32)
+        self.single_action_space = gymnasium.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
         self.render_mode = render_mode
         self.num_agents = num_envs
 
