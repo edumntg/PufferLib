@@ -16,7 +16,7 @@ const float ROCKET_MASS = 20.0f;
 
 const float MAX_GIMBAL_ANGLE = 10.0f;
 
-const float DT = 0.1f;
+const float DT = 0.05f;
 
 const float I = (1/12.0f) * ROCKET_MASS * (ROCKET_LENGTH * ROCKET_LENGTH); // Moment of inertia of a rod about its center
 
@@ -211,20 +211,26 @@ void c_render(MissileLaunch* env) {
     Rectangle rect = {env->position.x, SCREEN_HEIGHT - env->position.y, rocket_render_width, rocket_render_length};
     Vector2 origin = {rocket_render_width / 2, rocket_render_length / 2}; // center
 
-    float render_angle_deg = (M_PI / 2.0f - env->theta) * 180.0f / M_PI; // Convert to degrees for raylib
-    DrawRectanglePro(rect, origin, render_angle_deg, PUFF_CYAN);;
+    DrawRectanglePro(rect, origin, env->theta * 180.0f / M_PI, PUFF_CYAN);;
 
     // Draw a yellow smaller "fire"/cone at bottom of the rocket rotates based on the delta angle
     // Get the gimbal angle from the actions array
-    float delta = env->actions[0];
-    delta = delta * MAX_GIMBAL_ANGLE; // De-normalize
+    float delta_action = env->actions[0];
+    delta_action = clampf(delta_action, -1.0f, 1.0f);
+    float delta_rad = delta_action * MAX_GIMBAL_ANGLE * M_PI / 180.0f; // Convert gimbal angle to radians
 
     // Rocket's position on the screen
     Vector2 rocket_center = { env->position.x, SCREEN_HEIGHT - env->position.y };
-    float rocket_angle_rad = (env->theta) * M_PI / 180.0f;
-    float combined_angle_rad = (env->theta + delta) * M_PI / 180.0f;
 
-    // Calculate the position of the rocket's base
+    // The rocket body's orientation angle is env->theta (already in radians)
+    float rocket_angle_rad = env->theta;
+
+    // The thrust vector's orientation angle, which determines the fire's direction
+    float combined_angle_rad = env->theta + delta_rad;
+
+    // Calculate the position of the rocket's base in screen coordinates
+    // The vector from center to base is (-L/2) rotated by rocket_angle_rad.
+    // Y is inverted for screen coordinates.
     float rocket_base_x = rocket_center.x - (rocket_render_length / 2.0f) * sinf(rocket_angle_rad);
     float rocket_base_y = rocket_center.y + (rocket_render_length / 2.0f) * cosf(rocket_angle_rad);
     Vector2 rocket_base = { rocket_base_x, rocket_base_y };
@@ -233,20 +239,24 @@ void c_render(MissileLaunch* env) {
     float fire_length = 15.0f;
     float fire_width = 10.0f;
 
-    // Calculate the points of the triangle representing the fire
+    // Calculate the points of the triangle representing the fire.
+    // The fire cone points away from the base in the direction of thrust.
+    // Screen thrust vector: (sin(angle), cos(angle))
     Vector2 fire_tip = {
-        rocket_base.x - fire_length * sinf(combined_angle_rad),
+        rocket_base.x + fire_length * sinf(combined_angle_rad),
         rocket_base.y + fire_length * cosf(combined_angle_rad)
     };
 
+    // The base of the fire triangle is perpendicular to the thrust vector.
+    // Screen perpendicular vector: (cos(angle), -sin(angle))
     Vector2 base_left = {
         rocket_base.x + (fire_width / 2.0f) * cosf(combined_angle_rad),
-        rocket_base.y + (fire_width / 2.0f) * sinf(combined_angle_rad)
+        rocket_base.y - (fire_width / 2.0f) * sinf(combined_angle_rad)
     };
 
     Vector2 base_right = {
         rocket_base.x - (fire_width / 2.0f) * cosf(combined_angle_rad),
-        rocket_base.y - (fire_width / 2.0f) * sinf(combined_angle_rad)
+        rocket_base.y + (fire_width / 2.0f) * sinf(combined_angle_rad)
     };
 
     // Draw the triangle
