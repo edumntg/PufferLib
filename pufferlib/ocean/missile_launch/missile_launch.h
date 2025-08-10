@@ -18,13 +18,13 @@ const float I = (1/12.0f) * ROCKET_MASS * (ROCKET_LENGTH * ROCKET_LENGTH); // Mo
 // Controls/limits
 const float MAX_GIMBAL_ANGLE = 10.0f; // deg
 const float DT = 0.05f;
-const int MAX_STEPS = 1000;
+const int MAX_STEPS = 600;
 
 // Stabilization/shaping
 const float ANGULAR_DAMPING = 2.0f;   // per-second damping on omega
 const float LINEAR_DAMPING  = 0.2f;   // per-second damping on v
 const float TORQUE_GAIN     = 0.2f;   // scale torque to reduce spin
-const float HIT_RADIUS      = 20.0f;  // pixels
+const float HIT_RADIUS      = 40.0f;  // pixels
 
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
@@ -95,7 +95,7 @@ static inline void write_observations(MissileLaunch* env) {
 }
 
 void c_reset(MissileLaunch* env) {
-    env->position.x = 30.0f;
+    env->position.x = (float)(rand() % (SCREEN_WIDTH / 2));
     env->position.y = 30.0f;
     env->velocity.x = 0.0f;
     env->velocity.y = 0.0f;
@@ -103,7 +103,7 @@ void c_reset(MissileLaunch* env) {
     env->omega = 0.0f;
 
     // Random target pos in right half, avoid floor
-    env->target.x = (float)(rand() % (SCREEN_WIDTH / 2) + SCREEN_WIDTH / 2);
+    env->target.x = (float)(rand() % (SCREEN_WIDTH / 2));
     env->target.y = (float)(rand() % (SCREEN_HEIGHT - 30));
 
     env->tick = 0;
@@ -119,21 +119,22 @@ void c_step(MissileLaunch* env) {
     env->tick += 1;
 
     // Action → gimbal angle in radians
-    float delta = env->actions[0];
+    float thrust = env->actions[0] * ROCKET_THRUST; // scale thrust
+    float delta = env->actions[1];
     delta = clampf(delta, -1.0f, 1.0f);
     delta = delta * MAX_GIMBAL_ANGLE * (M_PI / 180.0f);
 
     env->delta = delta;
 
     // Torque and angular dynamics with damping
-    float torque = TORQUE_GAIN * (ROCKET_LENGTH / 2.0f) * ROCKET_THRUST * sinf(delta);
+    float torque = TORQUE_GAIN * (ROCKET_LENGTH / 2.0f) * thrust * sinf(delta);
     float alpha = torque / I;
     env->omega += (alpha - ANGULAR_DAMPING * env->omega) * DT;
     env->theta = wrap_pi(env->theta + env->omega * DT);
 
     // Thrust components (body angle + gimbal) and gravity
-    float thrust_x = ROCKET_THRUST * sinf(env->theta + delta);
-    float thrust_y = ROCKET_THRUST * cosf(env->theta + delta) - (GRAVITY * ROCKET_MASS);
+    float thrust_x = thrust * sinf(env->theta + delta);
+    float thrust_y = thrust * cosf(env->theta + delta) - (GRAVITY * ROCKET_MASS);
     float ax = thrust_x / ROCKET_MASS;
     float ay = thrust_y / ROCKET_MASS;
 
@@ -170,15 +171,24 @@ void c_step(MissileLaunch* env) {
         return;
     }
 
-    // Shaped reward: progress toward target, penalize angle error and spin
-    float angle_to_target = atan2f(env->target.y - env->position.y,
-                                   env->target.x - env->position.x);
-    float angle_error = wrap_pi(angle_to_target - env->theta);
-    float progress = env->prev_distance - dist_to_target;
+    // Compute unit vector to target
+    Vec2 to_target = sub2(env->target, env->position);
+    float dist = fmaxf(norm2(to_target), 1e-3f);
+    Vec2 to_target_unit = scalmul2(to_target, 1.0f / dist);
 
-    env->rewards[0] = 0.05f * progress
-                    - 0.001f * fabsf(angle_error)
-                    - 0.0005f * fabsf(env->omega);
+    // Radial speed (positive if moving toward target)
+    float radial_speed = dot2(env->velocity, to_target_unit);
+
+    // Angle alignment in [-1, 1]
+    float angle_to_target = atan2f(to_target.y, to_target.x);
+    float angle_error = wrap_pi(angle_to_target - env->theta);
+    float align = cosf(angle_error);
+
+    // Scaled, lower-variance reward
+    env->rewards[0] = 0.01f * radial_speed      // move toward target
+                    + 0.002f * align            // point toward target
+                    - 0.0002f * dist            // gentle pull to be closer
+                    - 0.001f * fabsf(env->omega);
 
     env->prev_distance = dist_to_target;
 
@@ -218,9 +228,13 @@ void c_render(MissileLaunch* env) {
     int rocket_render_width = 20;
     int rocket_render_length = 50;
     Rectangle rect = {env->position.x, SCREEN_HEIGHT - env->position.y, rocket_render_width, rocket_render_length};
-    Vector2 origin = {rocket_render_width / 2, rocket_render_length / 2}; // center
+    Vector2 origin = {rocket_render_width / 2, rocket_render_length}; // center
 
     DrawRectanglePro(rect, origin, env->theta * 180.0f / M_PI, PUFF_CYAN);
+
+    // Draw collision radius
+    DrawCircle(env->position.x, SCREEN_HEIGHT - env->position.y, 5, PUFF_RED);
+    DrawCircleLines(env->position.x, SCREEN_HEIGHT - env->position.y, HIT_RADIUS, (Color){255, 0, 0, 100});
 
     // Fire cone
     float delta_action = clampf(env->actions[0], -1.0f, 1.0f);
@@ -231,7 +245,7 @@ void c_render(MissileLaunch* env) {
     float combined_angle_rad = env->theta + delta_rad;
 
     float rocket_base_x = rocket_center.x - (rocket_render_length / 2.0f) * sinf(rocket_angle_rad);
-    float rocket_base_y = rocket_center.y + (rocket_render_length / 2.0f) * cosf(rocket_angle_rad);
+    float rocket_base_y = rocket_center.y + (rocket_render_length / 4.0f) * cosf(rocket_angle_rad);
     Vector2 rocket_base = { rocket_base_x, rocket_base_y };
 
     float fire_length = 15.0f;
@@ -274,8 +288,15 @@ void c_render(MissileLaunch* env) {
     DrawText(steps_text, 10, 100, 20, (Color){255, 255, 255, 255});
 
     char delta_text[32];
-    snprintf(delta_text, sizeof(delta_text), "Delta = %.4f", env->delta);
+    snprintf(delta_text, sizeof(delta_text), "Delta = %.4f", env->delta * 180.0f / M_PI);
     DrawText(delta_text, 10, 130, 20, (Color){255, 255, 255, 255});
 
+    char thrust_text[32];
+    snprintf(thrust_text, sizeof(thrust_text), "Thrust = %.4f", env->actions[0] * ROCKET_THRUST);
+    DrawText(thrust_text, 10, 160, 20, (Color){255, 255, 255, 255});
+
+    char reward_text[32];
+    snprintf(reward_text, sizeof(reward_text), "Reward = %.4f", env->rewards[0]);
+    DrawText(reward_text, 10, 190, 20, (Color){255, 255, 255, 255});
     EndDrawing();
 }
