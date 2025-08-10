@@ -4,7 +4,13 @@
 #include "../env_binding.h"
 
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    //env->size = unpack(kwargs, "size");
+    env->num_agents = unpack(kwargs, "num_agents");
+    env->position = calloc(env->num_agents, sizeof(Vec2));
+    env->velocity = calloc(env->num_agents, sizeof(Vec2));
+    env->theta = calloc(env->num_agents, sizeof(float));
+    env->omega = calloc(env->num_agents, sizeof(float));
+    env->delta = calloc(env->num_agents, sizeof(float));
+    env->prev_distance = calloc(env->num_agents, sizeof(float));
     return 0;
 }
 

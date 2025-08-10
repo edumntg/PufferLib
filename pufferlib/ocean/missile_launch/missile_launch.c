@@ -1,11 +1,12 @@
 #include "template.h"
 
 int main() {
+    int num_agents = 16;
     MissileLaunch env;
-    env.observations = (float*)calloc(6, sizeof(float));
-    env.actions = (float*)calloc(1, sizeof(float));
-    env.rewards = (float*)calloc(1, sizeof(float));
-    env.terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
+    env.observations = (float*)calloc(6*num_agents, sizeof(float));
+    env.actions = (float*)calloc(2*num_agents, sizeof(float));
+    env.rewards = (float*)calloc(num_agents, sizeof(float));
+    env.terminals = (unsigned char*)calloc(num_agents, sizeof(unsigned char));
 
     c_reset(&env);
     c_render(&env);
